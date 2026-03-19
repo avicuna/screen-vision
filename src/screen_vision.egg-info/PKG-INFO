@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: screen-vision
+Version: 0.1.0
+Summary: MCP server that gives Claude Code the ability to see your screen
+Requires-Python: >=3.11
+Requires-Dist: mcp[cli]>=1.0.0
+Requires-Dist: mss>=9.0.0
+Requires-Dist: Pillow>=10.0.0
+Requires-Dist: numpy>=1.24.0
+Provides-Extra: full
+Requires-Dist: pytesseract>=0.3.10; extra == "full"
+Requires-Dist: faster-whisper>=1.0.0; extra == "full"
+Requires-Dist: sounddevice>=0.4.6; extra == "full"
+Requires-Dist: opencv-python>=4.8.0; extra == "full"
+Provides-Extra: test
+Requires-Dist: pytest>=8.0.0; extra == "test"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "test"

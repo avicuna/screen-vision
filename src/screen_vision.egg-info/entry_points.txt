@@ -1,0 +1,2 @@
+[console_scripts]
+screen-vision-mcp = screen_vision.server:main

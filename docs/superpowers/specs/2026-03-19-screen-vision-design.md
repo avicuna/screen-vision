@@ -104,7 +104,7 @@ Watch the screen for a period of time, capturing keyframes at smart intervals wi
 | `duration_seconds` | `int` | `60` | How long to watch (max 300 for work, unlimited personal) |
 | `interval_seconds` | `float` | `4.0` | Base interval between frame captures |
 | `include_audio` | `bool` | `True` | Record mic audio and transcribe with Whisper |
-| `max_frames` | `int` | `30` | Maximum frames to return (work mode: no hard limit, use judgment) |
+| `max_frames` | `int` | `30` | Maximum frames to return. Hard cap: 50 in work mode, uncapped in personal. |
 
 **Flow:**
 1. Start two parallel threads:
@@ -253,27 +253,60 @@ PCI_PATTERNS = [
 # All matches validated with Luhn algorithm to avoid false positives
 ```
 
+**OCR False-Negative Mitigation (PCI):** OCR may misread digits in card numbers. To address this:
+- Block any frame where OCR detects a Luhn-candidate sequence with **any** character confidence below 0.8
+- If OCR confidence is low overall (< 70% average), treat the frame as potentially containing undetectable sensitive data and block it with a warning: `"Frame blocked: OCR confidence too low to guarantee PCI safety"`
+- This is documented as a known limitation — OCR-based PCI detection is best-effort, not a certified PCI scanning solution. The primary PCI control is "don't open payment pages while using Screen Vision."
+
 #### PII Patterns (REDACT — black box in image, mask in text)
 ```python
 PII_PATTERNS = [
-    r'\b[A-Z]{1,2}[0-9]{6,9}\b',                               # Passport numbers
-    r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',  # Email addresses
-    r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',                          # Phone (US)
-    r'\b\+?[0-9]{1,3}[-.\s]?[0-9]{8,12}\b',                   # Phone (international)
-    r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b',                # IP addresses
+    # Email addresses
+    r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
+    # Phone numbers — require leading indicator to reduce false positives
+    r'(?:tel:|phone:|call:|mobile:|☎|\+)\s*[0-9][\d\s\-().]{7,15}',
+    # IP addresses — exclude loopback, link-local, and version-like strings
+    # Only flag IPs in non-trivial ranges (10.x, 172.16-31.x, 192.168.x, or public)
+    r'\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b',
 ]
+# Note: Passport numbers excluded from v1 — the regex `[A-Z]{1,2}[0-9]{6,9}`
+# produces excessive false positives on version numbers, git SHAs, error codes.
+# Will revisit with country-specific patterns in v2.
 ```
+
+**Known limitation (multi-language):** PII patterns are Latin-script only. Screens may contain Thai, CJK, or other non-Latin PII that bypasses detection. Documented as a v1 limitation. Mitigation: the security scanner logs a warning when significant non-Latin text is detected, suggesting manual review.
 
 #### Secrets Patterns (always BLOCK)
 ```python
 SECRET_PATTERNS = [
+    # Generic credential assignments
     r'(?i)(password|passwd|pwd)\s*[:=]\s*\S+',
-    r'(?i)(api[_-]?key|apikey)\s*[:=]\s*\S+',
-    r'(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}',  # GitHub tokens
-    r'AKIA[0-9A-Z]{16}',                               # AWS access keys
-    r'(?i)bearer\s+[a-zA-Z0-9\-._~+/]+=*',           # Bearer tokens
-    r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}',    # JWT tokens
+    r'(?i)(api[_-]?key|apikey|secret[_-]?key)\s*[:=]\s*\S+',
+    # GitHub tokens
+    r'(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}',
+    # GitLab personal access tokens (Agoda uses GitLab daily)
+    r'glpat-[A-Za-z0-9_\-]{20,}',
+    # AWS access keys
+    r'AKIA[0-9A-Z]{16}',
+    # Vault tokens (HashiCorp Vault — used at Agoda)
+    r'(?:hvs\.|s\.)[A-Za-z0-9]{20,}',
+    # Bearer / Authorization headers
+    r'(?i)bearer\s+[a-zA-Z0-9\-._~+/]+=*',
+    # JWT tokens
+    r'eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}',
+    # Slack tokens
+    r'xox[bpsa]-[A-Za-z0-9\-]{10,}',
+    # SSH private key headers
+    r'-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----',
+    # GCP service account key indicator
+    r'"private_key"\s*:\s*"-----BEGIN',
+    # Generic Authorization headers
+    r'(?i)authorization\s*:\s*\S+',
+    # Database connection strings with passwords
+    r'(?i)(?:mysql|postgres|mongodb|redis)://[^:]+:[^@]+@',
 ]
+# Pattern list is configurable via SCREEN_VISION_EXTRA_SECRET_PATTERNS env var
+# (newline-separated regexes) so it can be updated without redeploying.
 ```
 
 #### Image Redaction
@@ -308,9 +341,31 @@ BLOCKED_APPS = [
 ]
 ```
 
-When `capture_window()` or `capture_screen()` detects a blocked app in the foreground:
-- Return an error: `"Cannot capture: [Slack] is in the blocked apps list for security compliance"`
+**Visibility check (not just foreground):** The deny-list checks ALL visible windows on screen, not just the active one. For `capture_screen()` and `capture_region()`, enumerate all on-screen windows via `CGWindowListCopyWindowInfo` and check if any blocked-app window overlaps the captured region. If a blocked app is visible anywhere in the capture area:
+- Option 1: BLOCK the entire capture with an error
+- Option 2: REDACT the blocked app's window region (black box) and capture the rest
+
+Default: BLOCK (safer). Configurable to REDACT via `SCREEN_VISION_DENYLIST_ACTION=redact`.
+
+When a blocked app is detected:
+- Return an error: `"Cannot capture: [Slack] is visible in the capture area. Minimize it or use capture_window() to target a specific app."`
 - Log the blocked attempt to the audit log
+
+### Rate Limiting (Work Mode)
+
+Prevent abuse from runaway tool loops or prompt injection:
+
+| Control | Limit | Rationale |
+|---------|-------|-----------|
+| Screenshot rate | Max 1 per 2 seconds | Prevents continuous surveillance |
+| `watch_screen` concurrency | Max 1 session at a time | Prevents parallel watchers |
+| Session capture budget | Max 200 captures per Claude session | Requires explicit user re-auth to extend |
+| `analyze_video` file size | Max 500MB | Prevents memory exhaustion |
+| `analyze_video` duration | Max 600 seconds | Bounds processing time |
+
+When a rate limit is hit, return: `"Rate limit: max 1 screenshot per 2 seconds. Try again shortly."`
+
+The session capture budget resets when Claude Code restarts. To extend mid-session, the user must explicitly approve via a confirmation prompt.
 
 ### Audio Security Controls
 
@@ -552,6 +607,63 @@ tests/
 ```
 
 Mock `mss` captures with pre-built test images. Mock `sounddevice` with pre-recorded audio buffers. Test security scanner with images containing known PCI/PII patterns.
+
+## Dependency Requirements by Mode
+
+| Dependency | Work Mode | Personal Mode |
+|-----------|-----------|---------------|
+| `mss` | Required | Required |
+| `Pillow` | Required | Required |
+| `sounddevice` | Required (for audio tools) | Required (for audio tools) |
+| `pytesseract` + `tesseract` binary | **Required** (security scanning depends on OCR) | Optional |
+| `faster-whisper` | Required (for audio tools) | Optional |
+| `opencv-python` | Optional (falls back to pixel diff) | Optional |
+| `ffmpeg` binary | Required (for `analyze_video`) | Optional |
+
+**Work mode startup check:** On server init, verify all required dependencies are installed. If `tesseract` is missing in work mode, **refuse to start** and print: `"ERROR: tesseract is required in work mode for PII/PCI security scanning. Install: brew install tesseract"`
+
+**Graceful degradation (personal mode):** If optional deps are missing, individual tools return a clear error: `"analyze_video requires ffmpeg. Install: brew install ffmpeg"`. Other tools continue working.
+
+## Error Response Schema
+
+All tools use a standard error format:
+
+```json
+{
+  "error": true,
+  "code": "SECURITY_BLOCKED",
+  "message": "Frame blocked: PCI data detected (Visa card ending ****1234)",
+  "details": {
+    "finding_type": "PCI",
+    "action": "BLOCK",
+    "blocked_patterns": 1
+  }
+}
+```
+
+Error codes:
+- `SECURITY_BLOCKED` — PCI/secrets detected, frame not sent
+- `SECURITY_REDACTED` — PII found and redacted (frame still sent, info only)
+- `APP_BLOCKED` — Blocked app visible in capture area
+- `CALL_ACTIVE` — Audio blocked because a call is in progress
+- `RATE_LIMITED` — Too many captures in quick succession
+- `PERMISSION_DENIED` — macOS screen recording or mic permission not granted
+- `DEPENDENCY_MISSING` — Required dependency not installed
+- `FILE_TOO_LARGE` — Video file exceeds size limit
+- `TIMEOUT` — Processing exceeded time limit
+
+## Image Processing Notes
+
+**EXIF stripping:** All images have EXIF metadata stripped before encoding. EXIF can contain GPS coordinates, device serial numbers, and timestamps. Stripping is done via Pillow's `image.save()` without `exif` parameter (Pillow strips by default when not explicitly passed).
+
+**JPEG quality:** Default 75 for screenshots, 65 for watch_screen frames (higher volume, lower per-frame importance).
+
+## Concurrency Model
+
+- **One `watch_screen` session at a time.** If a second `watch_screen` is called while one is running, return an error: `"A watch session is already active. Call stop or wait for it to complete."`
+- **`capture_screen` during `watch_screen`:** Allowed — the screenshot is independent of the watcher. Both use `mss` which is thread-safe.
+- **`read_screen_text` during `watch_screen`:** Allowed — OCR runs independently.
+- **Thread safety:** The frame sampler and audio recorder threads communicate via `threading.Event` for stop signals and `queue.Queue` for frame data. No shared mutable state.
 
 ## Non-Goals
 

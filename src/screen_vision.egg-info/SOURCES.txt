@@ -1,0 +1,10 @@
+pyproject.toml
+src/screen_vision/__init__.py
+src/screen_vision/config.py
+src/screen_vision.egg-info/PKG-INFO
+src/screen_vision.egg-info/SOURCES.txt
+src/screen_vision.egg-info/dependency_links.txt
+src/screen_vision.egg-info/entry_points.txt
+src/screen_vision.egg-info/requires.txt
+src/screen_vision.egg-info/top_level.txt
+tests/test_config.py
