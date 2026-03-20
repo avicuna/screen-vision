@@ -2,7 +2,7 @@
 
 > Give Claude Code the ability to see your screen
 
-Screen Vision is an MCP (Model Context Protocol) server that provides Claude with 8 tools for screen capture, real-time screen watching with audio transcription, video analysis, and OCR. Built for both personal use and corporate environments with comprehensive security controls.
+Screen Vision is an MCP (Model Context Protocol) server that provides Claude with 13 tools for screen capture, phone camera integration, real-time screen watching with audio transcription, video analysis, and OCR. Built for both personal use and corporate environments with comprehensive security controls.
 
 ## Tools
 
@@ -82,6 +82,49 @@ Run OCR on the screen or a specific region and extract text.
 Get lightweight context without capturing a screenshot: active window, cursor position, and monitor info.
 
 **Returns:** JSON with cursor position, active window (app name + title), and monitor list.
+
+## Phone Camera Integration
+
+Two approaches based on edition:
+
+### Work Mode — File-Drop (AirDrop)
+```
+1. Take a photo on your phone
+2. AirDrop to your Mac (or save to a shared folder)
+3. Claude analyzes it:
+   - "Analyze this photo" → Claude calls analyze_image()
+```
+
+New tool: `analyze_image(file_path, prompt)` — analyze any image file
+
+### Personal Mode — Live Camera Stream
+```
+1. Claude shows QR code → show_pairing_qr()
+2. Scan QR with iPhone → Safari opens camera page
+3. Camera streams to Claude in real-time
+4. "What am I looking at?" → Claude calls capture_camera()
+5. "Watch me work on this circuit" → Claude calls watch_camera()
+```
+
+New tools:
+- `show_pairing_qr()` — display QR code for phone pairing
+- `capture_camera()` — grab latest phone camera frame
+- `watch_camera()` — stream phone camera with audio
+- `phone_status()` — check connection
+
+### Setup for Personal Mode
+
+```bash
+# One-time: install mkcert for local TLS
+brew install mkcert
+mkcert -install
+mkcert $(ipconfig getifaddr en0)  # generates certs for your LAN IP
+
+# Trust on iPhone:
+# 1. AirDrop rootCA.pem to phone
+# 2. Settings → General → VPN & Device Management → Install
+# 3. Settings → General → About → Certificate Trust Settings → Enable
+```
 
 ## Quick Start
 
