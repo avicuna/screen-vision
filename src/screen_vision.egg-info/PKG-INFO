@@ -7,6 +7,8 @@ Requires-Dist: mcp[cli]>=1.0.0
 Requires-Dist: mss>=9.0.0
 Requires-Dist: Pillow>=10.0.0
 Requires-Dist: numpy>=1.24.0
+Requires-Dist: qrcode[pil]>=7.4.0
+Requires-Dist: websockets>=12.0
 Provides-Extra: full
 Requires-Dist: pytesseract>=0.3.10; extra == "full"
 Requires-Dist: faster-whisper>=1.0.0; extra == "full"

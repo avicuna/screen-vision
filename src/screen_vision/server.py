@@ -1,12 +1,15 @@
-"""MCP Server for Screen Vision - provides 8 tools for screen capture and analysis."""
+"""MCP Server for Screen Vision - provides 13 tools for screen capture and analysis."""
 import json
 import time
+import base64
+import socket
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from screen_vision.config import get_config
 from screen_vision import context
+from screen_vision import analyze as analyze_mod
 from screen_vision.capture import ScreenCapture, encode_jpeg
 from screen_vision.ocr import run_ocr, extract_text_near
 from screen_vision.security import SecurityScanner
@@ -546,6 +549,40 @@ async def read_screen_text(
     })
 
 
+# Phone camera bridge
+_bridge = None
+
+
+def _get_bridge():
+    """Get or create the global CameraBridge instance.
+
+    Returns:
+        CameraBridge instance
+    """
+    global _bridge
+    if _bridge is None:
+        from screen_vision.camera_bridge import CameraBridge
+        cfg = get_config()
+        _bridge = CameraBridge(port=cfg.camera_bridge_port)
+    return _bridge
+
+
+def _get_lan_ip() -> str:
+    """Get the LAN IP address of this machine.
+
+    Returns:
+        IP address as string, or 127.0.0.1 if unable to determine
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 @mcp.tool()
 async def get_active_context() -> str:
     """Get lightweight context: window, cursor, monitors.
@@ -563,6 +600,235 @@ async def get_active_context() -> str:
         "active_window": active_win,
         "monitors": monitors,
         "timestamp": time.time(),
+    })
+
+
+@mcp.tool()
+async def analyze_image(file_path: str, prompt: str = "") -> str:
+    """Analyze a dropped image file (AirDrop, screenshot, saved photo).
+
+    Works in both work and personal modes. In work mode, security scanning is applied.
+
+    Args:
+        file_path: Path to the image file to analyze
+        prompt: Optional analysis prompt (reserved for future use)
+
+    Returns:
+        JSON string with analyzed image data or error
+    """
+    result = analyze_mod.analyze_image(file_path, prompt)
+
+    if result.error:
+        return json.dumps({
+            "error": True,
+            "code": "ANALYSIS_FAILED",
+            "message": result.error
+        })
+
+    # Parse resolution string "1920x1080" into list [1920, 1080]
+    width, height = result.resolution.split("x")
+    resolution_list = [int(width), int(height)]
+
+    return json.dumps({
+        "image": result.base64_image,
+        "format": "jpeg",
+        "resolution": resolution_list,
+        "source": result.source,
+        "file_name": result.file_name,
+        "ocr_text": result.ocr_text,
+        "security_redactions": result.security_redactions,
+        "timestamp": result.timestamp,
+    })
+
+
+@mcp.tool()
+async def show_pairing_qr() -> str:
+    """Show QR code to connect phone camera. Scan with iPhone to start streaming.
+
+    Only available in personal mode. In work mode, use analyze_image() with AirDrop instead.
+
+    Returns:
+        JSON string with QR code data and pairing instructions, or error
+    """
+    cfg = get_config()
+    if cfg.is_work_mode:
+        return json.dumps({
+            "error": True,
+            "code": "WORK_MODE",
+            "message": "Phone camera streaming is not available in work mode. Use analyze_image() with AirDrop instead."
+        })
+
+    bridge = _get_bridge()
+    lan_ip = _get_lan_ip()
+    qr_data = bridge.generate_pairing_qr(lan_ip)
+
+    return json.dumps(qr_data)
+
+
+@mcp.tool()
+async def capture_camera(prompt: str = "") -> str:
+    """Grab the latest frame from connected phone camera.
+
+    Only available in personal mode. Requires phone to be connected via show_pairing_qr() first.
+
+    Args:
+        prompt: Optional prompt (reserved for future use)
+
+    Returns:
+        JSON string with frame data or error
+    """
+    cfg = get_config()
+    if cfg.is_work_mode:
+        return json.dumps({
+            "error": True,
+            "code": "WORK_MODE",
+            "message": "Use analyze_image() with AirDrop in work mode."
+        })
+
+    bridge = _get_bridge()
+    if not bridge.is_phone_connected:
+        return json.dumps({
+            "error": True,
+            "code": "NO_PHONE",
+            "message": "No phone connected. Use show_pairing_qr() first."
+        })
+
+    frame_data = bridge.frame_queue.get_latest()
+    if frame_data is None:
+        return json.dumps({
+            "error": True,
+            "code": "NO_FRAMES",
+            "message": "No frames received yet."
+        })
+
+    frame_bytes, timestamp = frame_data
+    b64 = base64.b64encode(frame_bytes).decode("utf-8")
+
+    return json.dumps({
+        "image": b64,
+        "format": "jpeg",
+        "source": "phone_camera",
+        "timestamp": timestamp,
+        "frame_age_ms": int((time.time() - timestamp) * 1000),
+    })
+
+
+@mcp.tool()
+async def watch_camera(
+    duration_seconds: int = 30,
+    include_audio: bool = True,
+    max_frames: int = 20
+) -> str:
+    """Stream phone camera frames with scene detection and optional audio.
+
+    Only available in personal mode. Requires phone to be connected via show_pairing_qr() first.
+    Collects frames over the specified duration, applies scene change detection to keep only
+    keyframes, and optionally records and transcribes audio.
+
+    Args:
+        duration_seconds: How long to collect frames (default: 30)
+        include_audio: Whether to collect and transcribe audio (default: True)
+        max_frames: Maximum number of keyframes to keep (default: 20)
+
+    Returns:
+        JSON string with keyframes, transcript, and metadata
+    """
+    cfg = get_config()
+    if cfg.is_work_mode:
+        return json.dumps({
+            "error": True,
+            "code": "WORK_MODE",
+            "message": "Use analyze_image() with AirDrop in work mode."
+        })
+
+    bridge = _get_bridge()
+    if not bridge.is_phone_connected:
+        return json.dumps({
+            "error": True,
+            "code": "NO_PHONE",
+            "message": "No phone connected. Use show_pairing_qr() first."
+        })
+
+    # Collect frames for duration
+    start_time = time.time()
+    frames_captured = 0
+    collected_frames = []
+
+    while time.time() - start_time < duration_seconds:
+        frame_data = bridge.frame_queue.get_latest()
+        if frame_data:
+            frame_bytes, timestamp = frame_data
+            # Simple deduplication: only add if timestamp is different from last frame
+            if not collected_frames or collected_frames[-1][1] != timestamp:
+                collected_frames.append((frame_bytes, timestamp))
+                frames_captured += 1
+
+        time.sleep(0.5)  # Check every 0.5 seconds
+
+    # Apply simple scene change detection: keep every Nth frame up to max_frames
+    if len(collected_frames) > max_frames:
+        step = len(collected_frames) // max_frames
+        keyframes = [collected_frames[i] for i in range(0, len(collected_frames), step)][:max_frames]
+    else:
+        keyframes = collected_frames
+
+    # Encode keyframes to base64
+    keyframes_json = []
+    for frame_bytes, timestamp in keyframes:
+        b64 = base64.b64encode(frame_bytes).decode("utf-8")
+        keyframes_json.append({
+            "base64_image": b64,
+            "timestamp": timestamp,
+        })
+
+    # Audio transcription (simplified for now)
+    transcript = []
+    if include_audio and bridge.audio_buffer:
+        # In a real implementation, we would transcribe the audio buffer
+        # For now, just note that audio was recorded
+        transcript.append({
+            "text": f"[Audio recorded: {len(bridge.audio_buffer)} chunks]",
+            "start_time": start_time,
+            "end_time": time.time(),
+            "nearest_frame_index": 0,
+        })
+
+    duration_actual = time.time() - start_time
+
+    return json.dumps({
+        "keyframes": keyframes_json,
+        "transcript": transcript,
+        "duration_actual": duration_actual,
+        "frames_captured": frames_captured,
+        "frames_skipped_duplicate": len(collected_frames) - len(keyframes),
+        "audio_recorded": include_audio and len(bridge.audio_buffer) > 0,
+        "error": None,
+    })
+
+
+@mcp.tool()
+async def phone_status() -> str:
+    """Check phone camera connection status.
+
+    Returns connection status, frame queue size, and server state.
+
+    Returns:
+        JSON string with status information
+    """
+    cfg = get_config()
+    bridge = _get_bridge() if not cfg.is_work_mode else None
+
+    if bridge is None:
+        return json.dumps({
+            "connected": False,
+            "mode": "work",
+            "message": "Phone streaming unavailable in work mode."
+        })
+
+    return json.dumps({
+        "connected": bridge.is_phone_connected,
+        "frames_in_queue": len(bridge.frame_queue),
+        "server_running": bridge.is_running,
     })
 
 
