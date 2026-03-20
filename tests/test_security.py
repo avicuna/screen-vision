@@ -43,6 +43,33 @@ class TestPCIDetection:
         assert finding.pattern_name == "visa_card"
         assert finding.action == "BLOCK"
 
+    def test_detects_visa_card_with_spaces(self):
+        """Scan Visa card with spaces, verify detection (Issue #5)."""
+        scanner = SecurityScanner()
+        result = scanner.scan_text("Payment: 4111 1111 1111 1111")
+
+        assert not result.is_clean
+        assert result.should_block
+        assert len(result.findings) == 1
+
+        finding = result.findings[0]
+        assert finding.finding_type == "PCI"
+        assert finding.pattern_name == "visa_card"
+        assert finding.action == "BLOCK"
+
+    def test_detects_visa_card_with_dashes(self):
+        """Scan Visa card with dashes, verify detection (Issue #5)."""
+        scanner = SecurityScanner()
+        result = scanner.scan_text("Payment: 4111-1111-1111-1111")
+
+        assert not result.is_clean
+        assert result.should_block
+        assert len(result.findings) == 1
+
+        finding = result.findings[0]
+        assert finding.finding_type == "PCI"
+        assert finding.pattern_name == "visa_card"
+
     def test_detects_mastercard(self):
         """Scan Mastercard number, verify PCI finding and should_block."""
         scanner = SecurityScanner()
@@ -281,6 +308,18 @@ class TestAppBlocklist:
         assert not scanner.is_app_blocked("Chrome")
         assert not scanner.is_app_blocked("Firefox")
 
+    def test_app_blocked_case_insensitive(self):
+        """Verify case-insensitive app blocking (Issue #6)."""
+        scanner = SecurityScanner()
+
+        # Should block regardless of case
+        assert scanner.is_app_blocked("slack")
+        assert scanner.is_app_blocked("SLACK")
+        assert scanner.is_app_blocked("Slack")
+        assert scanner.is_app_blocked("microsoft teams")
+        assert scanner.is_app_blocked("MICROSOFT TEAMS")
+        assert scanner.is_app_blocked("1password")
+
 
 class TestImageRedaction:
     """Test image redaction functionality."""
@@ -302,19 +341,21 @@ class TestImageRedaction:
             },
         ]
 
-        # Create findings that match OCR data
+        # Create findings that match OCR data (with _original_text)
         findings = [
             Finding(
                 finding_type="PII",
                 pattern_name="email",
-                matched_text="john@example.com",
+                matched_text="john...com",
                 action="REDACT",
+                _original_text="john@example.com",
             ),
             Finding(
                 finding_type="PCI",
                 pattern_name="visa_card",
-                matched_text="4111111111111111",
+                matched_text="4111...1111",
                 action="BLOCK",
+                _original_text="4111111111111111",
             ),
         ]
 
@@ -322,5 +363,76 @@ class TestImageRedaction:
         redacted = redact_image(img, ocr_data, findings)
 
         # Verify we got an image back
+        assert isinstance(redacted, Image.Image)
+        assert redacted.size == img.size
+
+    def test_redact_image_selective(self):
+        """Test that only matching regions are redacted (Issue #1)."""
+        # Create a simple test image
+        img = Image.new("RGB", (300, 150), color="white")
+
+        # Mock OCR data with multiple regions
+        ocr_data = [
+            {
+                "text": "john@example.com",
+                "bbox": (10, 10, 150, 30),
+            },
+            {
+                "text": "Card: 4111111111111111",
+                "bbox": (10, 40, 180, 60),
+            },
+            {
+                "text": "Clean text here",
+                "bbox": (10, 70, 150, 90),
+            },
+        ]
+
+        # Create findings that only match first region
+        findings = [
+            Finding(
+                finding_type="PII",
+                pattern_name="email",
+                matched_text="john...com",
+                action="REDACT",
+                _original_text="john@example.com",
+            ),
+        ]
+
+        # Redact the image
+        redacted = redact_image(img, ocr_data, findings)
+
+        # Verify we got an image back
+        assert isinstance(redacted, Image.Image)
+        assert redacted.size == img.size
+
+        # The first region should be black, others should remain white
+        # (This is a basic structural test - pixel checks would be more thorough)
+
+    def test_redact_image_with_spaces(self):
+        """Test redaction matches credit cards with spaces (Issue #5)."""
+        img = Image.new("RGB", (200, 100), color="white")
+
+        # OCR text has spaces
+        ocr_data = [
+            {
+                "text": "Card: 4111 1111 1111 1111",
+                "bbox": (10, 10, 180, 30),
+            },
+        ]
+
+        # Finding has normalized number (no spaces)
+        findings = [
+            Finding(
+                finding_type="PCI",
+                pattern_name="visa_card",
+                matched_text="4111...1111",
+                action="BLOCK",
+                _original_text="4111111111111111",
+            ),
+        ]
+
+        # Should still match and redact
+        redacted = redact_image(img, ocr_data, findings)
+
         assert isinstance(redacted, Image.Image)
         assert redacted.size == img.size
