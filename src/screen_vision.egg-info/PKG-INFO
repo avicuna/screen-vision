@@ -9,7 +9,9 @@ Requires-Dist: Pillow>=10.0.0
 Requires-Dist: numpy>=1.24.0
 Requires-Dist: qrcode[pil]>=7.4.0
 Requires-Dist: websockets>=12.0
+Requires-Dist: httpx>=0.27.0
 Provides-Extra: full
+Requires-Dist: paddleocr>=2.7.0; extra == "full"
 Requires-Dist: pytesseract>=0.3.10; extra == "full"
 Requires-Dist: faster-whisper>=1.0.0; extra == "full"
 Requires-Dist: sounddevice>=0.4.6; extra == "full"

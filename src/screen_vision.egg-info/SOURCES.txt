@@ -10,6 +10,7 @@ src/screen_vision/context.py
 src/screen_vision/ocr.py
 src/screen_vision/security.py
 src/screen_vision/server.py
+src/screen_vision/understanding.py
 src/screen_vision/video.py
 src/screen_vision/watcher.py
 src/screen_vision.egg-info/PKG-INFO
@@ -28,5 +29,6 @@ tests/test_ocr.py
 tests/test_phone_tools.py
 tests/test_security.py
 tests/test_server.py
+tests/test_understanding.py
 tests/test_video.py
 tests/test_watcher.py

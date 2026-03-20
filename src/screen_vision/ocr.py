@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
-from PIL import Image, ImageOps
+from PIL import Image
 import numpy as np
 
 # Try to import PaddleOCR

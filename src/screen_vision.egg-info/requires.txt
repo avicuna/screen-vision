@@ -4,8 +4,10 @@ Pillow>=10.0.0
 numpy>=1.24.0
 qrcode[pil]>=7.4.0
 websockets>=12.0
+httpx>=0.27.0
 
 [full]
+paddleocr>=2.7.0
 pytesseract>=0.3.10
 faster-whisper>=1.0.0
 sounddevice>=0.4.6
