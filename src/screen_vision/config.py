@@ -32,6 +32,12 @@ class Config:
     # Image quality
     default_jpeg_quality: int
 
+    # Camera bridge settings
+    camera_bridge_port: int
+    camera_bridge_auto_shutdown_minutes: int
+    camera_bridge_max_frame_size_bytes: int
+    camera_bridge_max_fps: int
+
     @property
     def is_work_mode(self) -> bool:
         """Check if running in work mode."""
@@ -52,6 +58,10 @@ _WORK_CONFIG = Config(
     max_video_duration=600,
     max_frames_per_watch=50,
     default_jpeg_quality=75,
+    camera_bridge_port=8443,
+    camera_bridge_auto_shutdown_minutes=10,
+    camera_bridge_max_frame_size_bytes=1048576,
+    camera_bridge_max_fps=10,
 )
 
 _PERSONAL_CONFIG = Config(
@@ -67,6 +77,10 @@ _PERSONAL_CONFIG = Config(
     max_video_duration=0,
     max_frames_per_watch=0,
     default_jpeg_quality=75,
+    camera_bridge_port=8443,
+    camera_bridge_auto_shutdown_minutes=10,
+    camera_bridge_max_frame_size_bytes=1048576,
+    camera_bridge_max_fps=10,
 )
 
 
