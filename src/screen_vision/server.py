@@ -1,4 +1,4 @@
-"""MCP Server for Screen Vision - provides 13 tools for screen capture and analysis."""
+"""MCP Server for Screen Vision - provides 14 tools for screen capture and analysis."""
 import asyncio
 import json
 import time
@@ -16,6 +16,7 @@ from screen_vision.ocr import run_ocr, extract_text_near
 from screen_vision.security import SecurityScanner
 from screen_vision.watcher import ScreenWatcher
 from screen_vision.video import analyze_video as analyze_video_func
+from screen_vision.understanding import understand_image
 
 # Initialize FastMCP server
 mcp = FastMCP(
@@ -730,6 +731,110 @@ async def analyze_image(file_path: str, prompt: str = "") -> str:
         })
     except Exception as e:
         return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
+
+
+@mcp.tool()
+async def understand_screen(prompt: str = "") -> str:
+    """Understand what's on screen — like Google Lens for your desktop.
+    Returns structured analysis: what app, what content, what's happening, actionable insights.
+    Optionally provide a prompt for focused analysis: 'what error is this?' or 'explain this dashboard'.
+
+    Args:
+        prompt: Optional custom prompt for focused analysis (default: "")
+
+    Returns:
+        JSON string with understanding result, image, OCR text, and metadata
+    """
+    hidden_app = None
+    try:
+        # Check rate limit
+        rate_err = _check_rate_limit()
+        if rate_err:
+            return json.dumps({
+                "error": True,
+                "code": "RATE_LIMITED",
+                "message": rate_err
+            })
+
+        # Auto-hide terminal for clean screenshot
+        hidden_app = context.hide_terminal()
+
+        # macOS needs ~2s to fully update the screen buffer after hiding a window
+        if hidden_app:
+            await asyncio.sleep(2.0)
+
+        # Capture screen
+        cap = _get_capture()
+        result = cap.capture_screen(delay_seconds=0, scale=0.5)
+
+        # Run OCR
+        ocr_result = None
+        ocr_text = ""
+        try:
+            ocr_result = run_ocr(result.image)
+            ocr_text = ocr_result.text if ocr_result else ""
+        except Exception:
+            # OCR failed - continue without it
+            pass
+
+        # Get config
+        cfg = get_config()
+
+        # Security scan in work mode
+        security_redactions = 0
+        if cfg.is_work_mode and ocr_text:
+            scanner = _get_scanner()
+            scan = scanner.scan_text(ocr_text)
+
+            if scan.should_block:
+                return json.dumps({
+                    "error": True,
+                    "code": "SECURITY_BLOCKED",
+                    "message": "Screen blocked: sensitive data detected"
+                })
+
+            security_redactions = len([f for f in scan.findings if f.action == "REDACT"])
+
+        # Call understanding module
+        understanding_result = await understand_image(
+            result.image,
+            ocr_text=ocr_text,
+            prompt=prompt
+        )
+
+        # Record capture AFTER successful analysis
+        _record_capture()
+
+        # Encode image
+        b64 = encode_jpeg(result.image, quality=cfg.default_jpeg_quality)
+
+        # Build response
+        return json.dumps({
+            "understanding": {
+                "summary": understanding_result.summary,
+                "application": understanding_result.application,
+                "tags": understanding_result.tags,
+                "entities": understanding_result.entities,
+                "actionable_insights": understanding_result.actionable_insights,
+                "confidence": understanding_result.confidence,
+                "error": understanding_result.error,
+                "full_text": understanding_result.full_text,
+            },
+            "image": b64,
+            "format": "jpeg",
+            "resolution": [result.image.width, result.image.height],
+            "full_text": ocr_text,
+            "active_window": f"{result.active_window.get('app_name', '')} — {result.active_window.get('window_title', '')}" if result.active_window else "Unknown",
+            "timestamp": time.time(),
+            "security_redactions": security_redactions,
+            "understanding_latency_ms": understanding_result.latency_ms,
+        })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
+    finally:
+        # Always restore the terminal, even if capture/understanding fails
+        if hidden_app:
+            context.restore_terminal(hidden_app)
 
 
 @mcp.tool()
