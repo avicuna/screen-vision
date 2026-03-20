@@ -151,8 +151,13 @@ class TestProcessFrame:
 
     def test_process_frame_blocks_on_denied_app(self, sample_image):
         """Should block frame if app is in deny-list."""
+        import screen_vision.server as srv
+        srv._scanner = None  # Reset singleton so mock takes effect
+
         with patch("screen_vision.server.get_config") as mock_config:
             mock_config.return_value.is_work_mode = True
+            mock_config.return_value.security_scanning_enabled = True
+            mock_config.return_value.default_jpeg_quality = 75
 
             with patch("screen_vision.server.SecurityScanner") as mock_scanner_class:
                 mock_scanner = MagicMock()
