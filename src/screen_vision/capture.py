@@ -54,45 +54,48 @@ class ScreenCapture:
         Returns:
             CaptureResult with the captured image and metadata
         """
-        # Wait if delay specified
-        if delay_seconds > 0:
+        # Auto-hide terminal so it doesn't occlude the screen
+        from screen_vision.context import hide_terminal, restore_terminal
+        hidden_app = hide_terminal()
+
+        # Brief pause to let the window manager update after hiding
+        if hidden_app:
+            time.sleep(0.3)
+        elif delay_seconds > 0:
+            # Only use manual delay if terminal wasn't auto-hidden
             time.sleep(delay_seconds)
 
-        # Capture the screen
-        with mss.mss() as sct:
-            # Get the appropriate monitor
-            if monitor == 0:
-                # Capture all monitors (aggregate)
-                monitor_dict = sct.monitors[0]
-            else:
-                # Capture specific monitor
-                monitor_dict = sct.monitors[monitor]
+        # Capture the screen (with terminal restore in finally)
+        try:
+            with mss.mss() as sct:
+                if monitor == 0:
+                    monitor_dict = sct.monitors[0]
+                else:
+                    monitor_dict = sct.monitors[monitor]
 
-            # Grab the screen
-            grabbed = sct.grab(monitor_dict)
+                grabbed = sct.grab(monitor_dict)
+                img = Image.frombytes("RGB", grabbed.size, grabbed.bgra, "raw", "BGRX")
 
-            # Convert BGRA to RGB using PIL
-            # mss returns BGRA format, need to convert to RGB
-            img = Image.frombytes("RGB", grabbed.size, grabbed.bgra, "raw", "BGRX")
+                if scale != 1.0:
+                    new_width = int(img.width * scale)
+                    new_height = int(img.height * scale)
+                    img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-            # Scale the image
-            if scale != 1.0:
-                new_width = int(img.width * scale)
-                new_height = int(img.height * scale)
-                img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            cursor_pos = get_cursor_position()
+            active_win = get_active_window()
+            timestamp = datetime.now()
 
-        # Get context information
-        cursor_pos = get_cursor_position()
-        active_win = get_active_window()
-        timestamp = datetime.now()
-
-        return CaptureResult(
-            image=img,
-            timestamp=timestamp,
-            monitor_index=monitor,
-            cursor_position=cursor_pos,
-            active_window=active_win,
-        )
+            return CaptureResult(
+                image=img,
+                timestamp=timestamp,
+                monitor_index=monitor,
+                cursor_position=cursor_pos,
+                active_window=active_win,
+            )
+        finally:
+            # Always restore the terminal, even if capture fails
+            if hidden_app:
+                restore_terminal(hidden_app)
 
     def capture_region(
         self,

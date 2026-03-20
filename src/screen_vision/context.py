@@ -184,3 +184,65 @@ def get_visible_windows() -> list[dict[str, Any]]:
         return windows
     except Exception:
         return []
+
+
+# Terminal apps that Claude Code typically runs in
+TERMINAL_APPS = {"iTerm2", "Terminal", "Alacritty", "kitty", "Warp", "Hyper", "WezTerm"}
+
+
+def hide_terminal() -> str | None:
+    """Hide the frontmost terminal app. Returns the app name if hidden, None if not a terminal."""
+    try:
+        active = get_active_window()
+        app = active.get("app_name", "")
+        if app in TERMINAL_APPS:
+            _run_osascript(f'tell application "System Events" to set visible of process "{app}" to false')
+            return app
+        return None
+    except Exception:
+        return None
+
+
+def restore_terminal(app_name: str) -> None:
+    """Restore a previously hidden terminal app."""
+    try:
+        _run_osascript(f'tell application "System Events" to set visible of process "{app_name}" to true')
+    except Exception:
+        pass
+
+
+def get_last_non_terminal_window() -> dict[str, str] | None:
+    """Get the most recent non-terminal window. Used for smart capture targeting.
+
+    When Claude Code is in the foreground, this finds what the user was
+    ACTUALLY looking at before switching to the terminal.
+
+    Returns:
+        Dict with app_name and window_title, or None if not found.
+    """
+    try:
+        # AppleScript to get the window list ordered by most recently focused
+        script = """
+        tell application "System Events"
+            set procList to every application process whose visible is true
+            set resultList to {}
+            repeat with proc in procList
+                try
+                    set appName to name of proc
+                    set winTitle to name of front window of proc
+                    set end of resultList to appName & tab & winTitle
+                end try
+            end repeat
+            return resultList as text
+        end tell
+        """
+        result = _run_osascript(script)
+        for line in result.split(", "):
+            parts = line.split("\t", 1)
+            if len(parts) == 2:
+                app_name, title = parts
+                if app_name not in TERMINAL_APPS:
+                    return {"app_name": app_name, "window_title": title}
+        return None
+    except Exception:
+        return None
