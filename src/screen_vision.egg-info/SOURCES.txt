@@ -25,6 +25,7 @@ tests/test_capture.py
 tests/test_config.py
 tests/test_context.py
 tests/test_ocr.py
+tests/test_phone_tools.py
 tests/test_security.py
 tests/test_server.py
 tests/test_video.py

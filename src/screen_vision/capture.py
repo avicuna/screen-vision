@@ -58,9 +58,9 @@ class ScreenCapture:
         from screen_vision.context import hide_terminal, restore_terminal
         hidden_app = hide_terminal()
 
-        # Brief pause to let the window manager update after hiding
+        # macOS needs ~2s to fully update the screen buffer after hiding a window
         if hidden_app:
-            time.sleep(0.3)
+            time.sleep(2.0)
         elif delay_seconds > 0:
             # Only use manual delay if terminal wasn't auto-hidden
             time.sleep(delay_seconds)

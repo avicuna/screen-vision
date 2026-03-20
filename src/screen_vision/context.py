@@ -191,12 +191,23 @@ TERMINAL_APPS = {"iTerm2", "Terminal", "Alacritty", "kitty", "Warp", "Hyper", "W
 
 
 def hide_terminal() -> str | None:
-    """Hide the frontmost terminal app. Returns the app name if hidden, None if not a terminal."""
+    """Hide the frontmost terminal app. Returns the app name if hidden, None if not a terminal.
+
+    Uses 'tell application X to activate' then Cmd+H to reliably hide.
+    The 'set visible to false' approach is instant but the screen buffer
+    may not update before capture. Cmd+H triggers proper window animations
+    that macOS's compositor tracks.
+    """
     try:
         active = get_active_window()
         app = active.get("app_name", "")
         if app in TERMINAL_APPS:
-            _run_osascript(f'tell application "System Events" to set visible of process "{app}" to false')
+            # Use the app's own hide command for reliable hiding
+            _run_osascript(f'''
+                tell application "System Events"
+                    set visible of process "{app}" to false
+                end tell
+            ''')
             return app
         return None
     except Exception:
@@ -204,9 +215,13 @@ def hide_terminal() -> str | None:
 
 
 def restore_terminal(app_name: str) -> None:
-    """Restore a previously hidden terminal app."""
+    """Restore a previously hidden terminal app and bring it to front."""
     try:
-        _run_osascript(f'tell application "System Events" to set visible of process "{app_name}" to true')
+        _run_osascript(f'''
+            tell application "{app_name}"
+                activate
+            end tell
+        ''')
     except Exception:
         pass
 
