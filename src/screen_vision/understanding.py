@@ -40,13 +40,15 @@ def _encode_image_to_base64(image: Image.Image, quality: int = 85) -> str:
         Base64-encoded JPEG string
     """
     buffer = io.BytesIO()
-    # Convert RGBA to RGB if necessary
-    if image.mode in ('RGBA', 'LA', 'P'):
-        rgb_image = Image.new('RGB', image.size, (255, 255, 255))
-        if image.mode == 'P':
-            image = image.convert('RGBA')
-        rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
-        image = rgb_image
+    # Convert to RGB if not already (handles RGBA, LA, P, L, CMYK, etc.)
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+
+    # Downscale if very large (saves tokens/cost, LLM doesn't need 4K)
+    max_dim = 1536
+    if max(image.size) > max_dim:
+        ratio = max_dim / max(image.size)
+        image = image.resize((int(image.width * ratio), int(image.height * ratio)), Image.LANCZOS)
 
     image.save(buffer, format='JPEG', quality=quality)
     buffer.seek(0)
@@ -208,15 +210,42 @@ async def understand_image(
         # Extract JSON from content
         result_json = _extract_json_from_response(content)
 
-        # Build result
+        # Validate and coerce response fields
+        app = result_json.get("application", {})
+        if not isinstance(app, dict):
+            app = {"name": "unknown", "type": "other"}
+        if "name" not in app:
+            app["name"] = "unknown"
+        if "type" not in app:
+            app["type"] = "other"
+
+        confidence = result_json.get("confidence", 0.0)
+        try:
+            confidence = float(confidence)
+            confidence = max(0.0, min(1.0, confidence))
+        except (TypeError, ValueError):
+            confidence = 0.0
+
+        tags = result_json.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+
+        entities = result_json.get("entities", [])
+        if not isinstance(entities, list):
+            entities = []
+
+        insights = result_json.get("actionable_insights", [])
+        if not isinstance(insights, list):
+            insights = []
+
         return UnderstandingResult(
-            summary=result_json.get("summary", ""),
-            application=result_json.get("application", {"name": "unknown", "type": "other"}),
-            tags=result_json.get("tags", []),
-            entities=result_json.get("entities", []),
-            actionable_insights=result_json.get("actionable_insights", []),
+            summary=str(result_json.get("summary", "")),
+            application=app,
+            tags=tags,
+            entities=entities,
+            actionable_insights=insights,
             full_text=ocr_text,
-            confidence=result_json.get("confidence", 0.0),
+            confidence=confidence,
             error=None,
             latency_ms=int((time.time() - start_time) * 1000)
         )
