@@ -1,4 +1,5 @@
 """MCP Server for Screen Vision - provides 13 tools for screen capture and analysis."""
+import asyncio
 import json
 import time
 import base64
@@ -26,6 +27,22 @@ mcp = FastMCP(
 _session_captures = 0
 _last_capture_time = 0.0
 _capture: ScreenCapture | None = None
+
+# Security scanner singleton
+_scanner: SecurityScanner | None = None
+
+
+def _get_scanner() -> SecurityScanner:
+    """Get or create the global SecurityScanner instance.
+
+    Returns:
+        SecurityScanner instance
+    """
+    global _scanner
+    if _scanner is None:
+        cfg = get_config()
+        _scanner = SecurityScanner(enabled=cfg.security_scanning_enabled)
+    return _scanner
 
 
 def _get_capture() -> ScreenCapture:
@@ -106,7 +123,7 @@ def _process_frame(
     # Security scan in work mode
     security_redactions = 0
     if cfg.is_work_mode:
-        scanner = SecurityScanner(enabled=True)
+        scanner = _get_scanner()
 
         # Check app deny-list
         if active_window and scanner.is_app_blocked(active_window.get("app_name", "")):
@@ -159,30 +176,37 @@ async def capture_screen(
     Returns:
         JSON string with captured frame data or error
     """
-    # Check rate limit
-    rate_err = _check_rate_limit()
-    if rate_err:
-        return json.dumps({
-            "error": True,
-            "code": "RATE_LIMITED",
-            "message": rate_err
-        })
+    try:
+        # Check rate limit
+        rate_err = _check_rate_limit()
+        if rate_err:
+            return json.dumps({
+                "error": True,
+                "code": "RATE_LIMITED",
+                "message": rate_err
+            })
 
-    # Record capture
-    _record_capture()
+        # Wait asynchronously for delay
+        if delay_seconds > 0:
+            await asyncio.sleep(delay_seconds)
 
-    # Capture screen
-    cap = _get_capture()
-    result = cap.capture_screen(
-        delay_seconds=delay_seconds,
-        monitor=monitor,
-        scale=scale
-    )
+        # Capture screen
+        cap = _get_capture()
+        result = cap.capture_screen(
+            delay_seconds=0,  # Already waited above
+            monitor=monitor,
+            scale=scale
+        )
 
-    # Process frame
-    processed = _process_frame(result.image, result.cursor_position, result.active_window)
+        # Record capture AFTER successful capture
+        _record_capture()
 
-    return json.dumps(processed)
+        # Process frame
+        processed = _process_frame(result.image, result.cursor_position, result.active_window)
+
+        return json.dumps(processed)
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -205,26 +229,29 @@ async def capture_region(
     Returns:
         JSON string with captured frame data or error
     """
-    # Check rate limit
-    rate_err = _check_rate_limit()
-    if rate_err:
-        return json.dumps({
-            "error": True,
-            "code": "RATE_LIMITED",
-            "message": rate_err
-        })
+    try:
+        # Check rate limit
+        rate_err = _check_rate_limit()
+        if rate_err:
+            return json.dumps({
+                "error": True,
+                "code": "RATE_LIMITED",
+                "message": rate_err
+            })
 
-    # Record capture
-    _record_capture()
+        # Capture region
+        cap = _get_capture()
+        result = cap.capture_region(x, y, width, height, scale=scale)
 
-    # Capture region
-    cap = _get_capture()
-    result = cap.capture_region(x, y, width, height, scale=scale)
+        # Record capture AFTER successful capture
+        _record_capture()
 
-    # Process frame
-    processed = _process_frame(result.image, result.cursor_position, result.active_window)
+        # Process frame
+        processed = _process_frame(result.image, result.cursor_position, result.active_window)
 
-    return json.dumps(processed)
+        return json.dumps(processed)
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -241,26 +268,29 @@ async def capture_window(
     Returns:
         JSON string with captured frame data or error
     """
-    # Check rate limit
-    rate_err = _check_rate_limit()
-    if rate_err:
-        return json.dumps({
-            "error": True,
-            "code": "RATE_LIMITED",
-            "message": rate_err
-        })
+    try:
+        # Check rate limit
+        rate_err = _check_rate_limit()
+        if rate_err:
+            return json.dumps({
+                "error": True,
+                "code": "RATE_LIMITED",
+                "message": rate_err
+            })
 
-    # Record capture
-    _record_capture()
+        # Capture window
+        cap = _get_capture()
+        result = cap.capture_window(window_title, scale=scale)
 
-    # Capture window
-    cap = _get_capture()
-    result = cap.capture_window(window_title, scale=scale)
+        # Record capture AFTER successful capture
+        _record_capture()
 
-    # Process frame
-    processed = _process_frame(result.image, result.cursor_position, result.active_window)
+        # Process frame
+        processed = _process_frame(result.image, result.cursor_position, result.active_window)
 
-    return json.dumps(processed)
+        return json.dumps(processed)
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -270,8 +300,11 @@ async def list_monitors() -> str:
     Returns:
         JSON string with monitor information
     """
-    monitors = context.get_monitors()
-    return json.dumps({"monitors": monitors})
+    try:
+        monitors = context.get_monitors()
+        return json.dumps({"monitors": monitors})
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -292,95 +325,129 @@ async def watch_screen(
     Returns:
         JSON string with keyframes, transcript, and metadata
     """
-    cfg = get_config()
+    try:
+        cfg = get_config()
 
-    # Check rate limit for initial capture
-    rate_err = _check_rate_limit()
-    if rate_err:
-        return json.dumps({
-            "error": True,
-            "code": "RATE_LIMITED",
-            "message": rate_err
-        })
-
-    # Check work mode limits
-    if cfg.is_work_mode:
-        if cfg.max_watch_duration > 0 and duration_seconds > cfg.max_watch_duration:
+        # Check rate limit for initial capture
+        rate_err = _check_rate_limit()
+        if rate_err:
             return json.dumps({
                 "error": True,
-                "code": "DURATION_EXCEEDED",
-                "message": f"Duration ({duration_seconds}s) exceeds limit ({cfg.max_watch_duration}s)"
-            })
-        if cfg.max_frames_per_watch > 0 and max_frames > cfg.max_frames_per_watch:
-            return json.dumps({
-                "error": True,
-                "code": "FRAMES_EXCEEDED",
-                "message": f"Max frames ({max_frames}) exceeds limit ({cfg.max_frames_per_watch})"
+                "code": "RATE_LIMITED",
+                "message": rate_err
             })
 
-    # Record capture
-    _record_capture()
+        # Check work mode limits
+        if cfg.is_work_mode:
+            if cfg.max_watch_duration > 0 and duration_seconds > cfg.max_watch_duration:
+                return json.dumps({
+                    "error": True,
+                    "code": "DURATION_EXCEEDED",
+                    "message": f"Duration ({duration_seconds}s) exceeds limit ({cfg.max_watch_duration}s)"
+                })
+            if cfg.max_frames_per_watch > 0 and max_frames > cfg.max_frames_per_watch:
+                return json.dumps({
+                    "error": True,
+                    "code": "FRAMES_EXCEEDED",
+                    "message": f"Max frames ({max_frames}) exceeds limit ({cfg.max_frames_per_watch})"
+                })
 
-    # Create watcher and watch
-    watcher = ScreenWatcher(
-        duration_seconds=duration_seconds,
-        interval_seconds=interval_seconds,
-        include_audio=include_audio,
-        max_frames=max_frames
-    )
+        # Create watcher and watch
+        watcher = ScreenWatcher(
+            duration_seconds=duration_seconds,
+            interval_seconds=interval_seconds,
+            include_audio=include_audio,
+            max_frames=max_frames
+        )
 
-    result = watcher.watch()
+        result = watcher.watch()
 
-    # Security scan keyframes in work mode
-    security_redactions = 0
-    if cfg.is_work_mode:
-        scanner = SecurityScanner(enabled=True)
-        clean_keyframes = []
+        # Record capture AFTER successful watch
+        _record_capture()
 
-        for keyframe in result.keyframes:
-            # Check if OCR text contains sensitive data
-            if keyframe.ocr_near_cursor:
-                scan = scanner.scan_text(keyframe.ocr_near_cursor)
-                if scan.should_block:
-                    # Skip this frame
+        # Security scan keyframes in work mode
+        security_redactions = 0
+        if cfg.is_work_mode:
+            scanner = _get_scanner()
+            clean_keyframes = []
+
+            for keyframe in result.keyframes:
+                # Run full OCR on each keyframe to scan entire screen
+                try:
+                    from PIL import Image
+                    import io
+                    # Decode base64 image
+                    img_bytes = base64.b64decode(keyframe.base64_image)
+                    image = Image.open(io.BytesIO(img_bytes))
+
+                    # Run full OCR
+                    ocr_result = run_ocr(image)
+                    full_text = ocr_result.text if ocr_result else ""
+
+                    # Scan full text
+                    if full_text:
+                        scan = scanner.scan_text(full_text)
+                        if scan.should_block:
+                            # Skip this frame
+                            security_redactions += 1
+                            continue
+
+                        # If redaction is needed, redact the image
+                        if scan.should_redact and ocr_result:
+                            from screen_vision.security import redact_image
+                            redacted_image = redact_image(image, ocr_result.blocks, scan.findings)
+                            # Re-encode the redacted image
+                            keyframe.base64_image = encode_jpeg(redacted_image, quality=cfg.default_jpeg_quality)
+
+                            # Mask PII in OCR text
+                            masked_text = full_text
+                            for finding in scan.findings:
+                                if finding.action == "REDACT":
+                                    masked_text = masked_text.replace(finding.match, "[REDACTED]")
+                            keyframe.ocr_near_cursor = masked_text[:200]  # Keep first 200 chars
+
+                        security_redactions += len([f for f in scan.findings if f.action == "REDACT"])
+                except Exception:
+                    # OCR/redaction failed - skip frame to be safe
                     security_redactions += 1
                     continue
-                security_redactions += len([f for f in scan.findings if f.action == "REDACT"])
 
-            clean_keyframes.append(keyframe)
+                clean_keyframes.append(keyframe)
 
-        result.keyframes = clean_keyframes
+            result.keyframes = clean_keyframes
 
-    # Build JSON response
-    keyframes_json = []
-    for kf in result.keyframes:
-        keyframes_json.append({
-            "base64_image": kf.base64_image,
-            "timestamp": kf.timestamp,
-            "active_window": f"{kf.active_window.get('app_name', '')} — {kf.active_window.get('window_title', '')}",
-            "cursor_position": list(kf.cursor_position) if kf.cursor_position else None,
-            "ocr_near_cursor": kf.ocr_near_cursor,
+        # Build JSON response
+        keyframes_json = []
+        for kf in result.keyframes:
+            keyframes_json.append({
+                "base64_image": kf.base64_image,
+                "timestamp": kf.timestamp,
+                "active_window": f"{kf.active_window.get('app_name', '')} — {kf.active_window.get('window_title', '')}",
+                "cursor_position": list(kf.cursor_position) if kf.cursor_position else None,
+                "ocr_near_cursor": kf.ocr_near_cursor,
+            })
+
+        transcript_json = []
+        for seg in result.transcript:
+            transcript_json.append({
+                "text": seg.text,
+                "start_time": seg.start_time,
+                "end_time": seg.end_time,
+                "nearest_frame_index": seg.nearest_frame_index,
+            })
+
+        return json.dumps({
+            "keyframes": keyframes_json,
+            "transcript": transcript_json,
+            "duration_actual": result.duration_actual,
+            "frames_captured": result.frames_captured,
+            "frames_skipped_duplicate": result.frames_skipped_duplicate,
+            "audio_recorded": result.audio_recorded,
+            "security_redactions": security_redactions,
+            "error": result.error,
         })
-
-    transcript_json = []
-    for seg in result.transcript:
-        transcript_json.append({
-            "text": seg.text,
-            "start_time": seg.start_time,
-            "end_time": seg.end_time,
-            "nearest_frame_index": seg.nearest_frame_index,
-        })
-
-    return json.dumps({
-        "keyframes": keyframes_json,
-        "transcript": transcript_json,
-        "duration_actual": result.duration_actual,
-        "frames_captured": result.frames_captured,
-        "frames_skipped_duplicate": result.frames_skipped_duplicate,
-        "audio_recorded": result.audio_recorded,
-        "security_redactions": security_redactions,
-        "error": result.error,
-    })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -401,76 +468,85 @@ async def analyze_video(
     Returns:
         JSON string with extracted frames and metadata
     """
-    # Check rate limit
-    rate_err = _check_rate_limit()
-    if rate_err:
-        return json.dumps({
-            "error": True,
-            "code": "RATE_LIMITED",
-            "message": rate_err
-        })
+    try:
+        # Check rate limit
+        rate_err = _check_rate_limit()
+        if rate_err:
+            return json.dumps({
+                "error": True,
+                "code": "RATE_LIMITED",
+                "message": rate_err
+            })
 
-    # Record capture
-    _record_capture()
+        # Analyze video
+        result = analyze_video_func(
+            file_path=file_path,
+            start_time=start_time,
+            end_time=end_time,
+            max_frames=max_frames
+        )
 
-    # Analyze video
-    result = analyze_video_func(
-        file_path=file_path,
-        start_time=start_time,
-        end_time=end_time,
-        max_frames=max_frames
-    )
+        # If error occurred
+        if result.error:
+            return json.dumps({
+                "error": True,
+                "code": "VIDEO_ERROR",
+                "message": result.error
+            })
 
-    # If error occurred
-    if result.error:
-        return json.dumps({
-            "error": True,
-            "code": "VIDEO_ERROR",
-            "message": result.error
-        })
+        # Record capture AFTER successful analysis
+        _record_capture()
 
-    # Security scan frames in work mode
-    cfg = get_config()
-    security_redactions = 0
-    if cfg.is_work_mode:
-        scanner = SecurityScanner(enabled=True)
-        clean_keyframes = []
+        # Security scan frames in work mode
+        cfg = get_config()
+        security_redactions = 0
+        if cfg.is_work_mode:
+            scanner = _get_scanner()
+            clean_keyframes = []
 
+            for kf in result.keyframes:
+                # Run OCR on frame
+                try:
+                    ocr_result = run_ocr(kf["image"])
+                    if ocr_result and ocr_result.text:
+                        scan = scanner.scan_text(ocr_result.text)
+                        if scan.should_block:
+                            # Skip this frame
+                            security_redactions += 1
+                            continue
+
+                        # If redaction is needed, redact the image
+                        if scan.should_redact:
+                            from screen_vision.security import redact_image
+                            kf["image"] = redact_image(kf["image"], ocr_result.blocks, scan.findings)
+
+                        security_redactions += len([f for f in scan.findings if f.action == "REDACT"])
+                except Exception:
+                    # OCR failed - include frame anyway
+                    pass
+
+                clean_keyframes.append(kf)
+
+            result.keyframes = clean_keyframes
+
+        # Encode frames to base64
+        keyframes_json = []
         for kf in result.keyframes:
-            # Run OCR on frame
-            try:
-                ocr_result = run_ocr(kf["image"])
-                if ocr_result and ocr_result.text:
-                    scan = scanner.scan_text(ocr_result.text)
-                    if scan.should_block:
-                        # Skip this frame
-                        security_redactions += 1
-                        continue
-                    security_redactions += len([f for f in scan.findings if f.action == "REDACT"])
-            except Exception:
-                # OCR failed - include frame anyway
-                pass
+            b64 = encode_jpeg(kf["image"], quality=75)
+            keyframes_json.append({
+                "base64_image": b64,
+                "timestamp": kf["timestamp"],
+            })
 
-            clean_keyframes.append(kf)
-
-        result.keyframes = clean_keyframes
-
-    # Encode frames to base64
-    keyframes_json = []
-    for kf in result.keyframes:
-        b64 = encode_jpeg(kf["image"], quality=75)
-        keyframes_json.append({
-            "base64_image": b64,
-            "timestamp": kf["timestamp"],
+        return json.dumps({
+            "keyframes": keyframes_json,
+            "duration": result.duration,
+            "frames_extracted": result.frames_extracted,
+            "security_redactions": security_redactions,
+            "error": None,
         })
-
-    return json.dumps({
-        "keyframes": keyframes_json,
-        "duration": result.duration,
-        "frames_extracted": result.frames_extracted,
-        "security_redactions": security_redactions,
-        "error": None,
-    })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -485,68 +561,77 @@ async def read_screen_text(
     Returns:
         JSON string with extracted text
     """
-    # Check rate limit
-    rate_err = _check_rate_limit()
-    if rate_err:
-        return json.dumps({
-            "error": True,
-            "code": "RATE_LIMITED",
-            "message": rate_err
-        })
+    try:
+        # Check rate limit
+        rate_err = _check_rate_limit()
+        if rate_err:
+            return json.dumps({
+                "error": True,
+                "code": "RATE_LIMITED",
+                "message": rate_err
+            })
 
-    # Record capture
-    _record_capture()
+        # Parse region if provided
+        cap = _get_capture()
+        if region:
+            try:
+                parts = region.split(",")
+                x, y, width, height = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
+                result = cap.capture_region(x, y, width, height, scale=1.0)
+            except Exception as e:
+                return json.dumps({
+                    "error": True,
+                    "code": "INVALID_REGION",
+                    "message": f"Invalid region format: {e}"
+                })
+        else:
+            result = cap.capture_screen(scale=0.5)
 
-    # Parse region if provided
-    cap = _get_capture()
-    if region:
+        # Record capture AFTER successful capture
+        _record_capture()
+
+        # Run OCR
         try:
-            parts = region.split(",")
-            x, y, width, height = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
-            result = cap.capture_region(x, y, width, height, scale=1.0)
+            ocr_result = run_ocr(result.image)
         except Exception as e:
             return json.dumps({
                 "error": True,
-                "code": "INVALID_REGION",
-                "message": f"Invalid region format: {e}"
+                "code": "OCR_ERROR",
+                "message": f"OCR failed: {e}"
             })
-    else:
-        result = cap.capture_screen(scale=0.5)
 
-    # Run OCR
-    try:
-        ocr_result = run_ocr(result.image)
-    except Exception as e:
+        # Security scan text in work mode
+        cfg = get_config()
+        security_redactions = 0
+        text = ocr_result.text if ocr_result else ""
+
+        if cfg.is_work_mode and text:
+            scanner = _get_scanner()
+            scan = scanner.scan_text(text)
+
+            if scan.should_block:
+                return json.dumps({
+                    "error": True,
+                    "code": "SECURITY_BLOCKED",
+                    "message": "Text blocked: sensitive data detected"
+                })
+
+            # Mask PII in text if redaction is needed
+            if scan.should_redact:
+                for finding in scan.findings:
+                    if finding.action == "REDACT":
+                        text = text.replace(finding.match, "[REDACTED]")
+
+            security_redactions = len([f for f in scan.findings if f.action == "REDACT"])
+
         return json.dumps({
-            "error": True,
-            "code": "OCR_ERROR",
-            "message": f"OCR failed: {e}"
+            "text": text,
+            "average_confidence": ocr_result.average_confidence if ocr_result else 0.0,
+            "security_redactions": security_redactions,
+            "error": None,
         })
-
-    # Security scan text in work mode
-    cfg = get_config()
-    security_redactions = 0
-    text = ocr_result.text if ocr_result else ""
-
-    if cfg.is_work_mode and text:
-        scanner = SecurityScanner(enabled=True)
-        scan = scanner.scan_text(text)
-
-        if scan.should_block:
-            return json.dumps({
-                "error": True,
-                "code": "SECURITY_BLOCKED",
-                "message": "Text blocked: sensitive data detected"
-            })
-
-        security_redactions = len([f for f in scan.findings if f.action == "REDACT"])
-
-    return json.dumps({
-        "text": text,
-        "average_confidence": ocr_result.average_confidence if ocr_result else 0.0,
-        "security_redactions": security_redactions,
-        "error": None,
-    })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 # Phone camera bridge
@@ -590,17 +675,20 @@ async def get_active_context() -> str:
     Returns:
         JSON string with context information
     """
-    # No capture needed - just metadata
-    cursor_pos = context.get_cursor_position()
-    active_win = context.get_active_window()
-    monitors = context.get_monitors()
+    try:
+        # No capture needed - just metadata
+        cursor_pos = context.get_cursor_position()
+        active_win = context.get_active_window()
+        monitors = context.get_monitors()
 
-    return json.dumps({
-        "cursor_position": list(cursor_pos) if cursor_pos else None,
-        "active_window": active_win,
-        "monitors": monitors,
-        "timestamp": time.time(),
-    })
+        return json.dumps({
+            "cursor_position": list(cursor_pos) if cursor_pos else None,
+            "active_window": active_win,
+            "monitors": monitors,
+            "timestamp": time.time(),
+        })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -616,29 +704,32 @@ async def analyze_image(file_path: str, prompt: str = "") -> str:
     Returns:
         JSON string with analyzed image data or error
     """
-    result = analyze_mod.analyze_image(file_path, prompt)
+    try:
+        result = analyze_mod.analyze_image(file_path, prompt)
 
-    if result.error:
+        if result.error:
+            return json.dumps({
+                "error": True,
+                "code": "ANALYSIS_FAILED",
+                "message": result.error
+            })
+
+        # Parse resolution string "1920x1080" into list [1920, 1080]
+        width, height = result.resolution.split("x")
+        resolution_list = [int(width), int(height)]
+
         return json.dumps({
-            "error": True,
-            "code": "ANALYSIS_FAILED",
-            "message": result.error
+            "image": result.base64_image,
+            "format": "jpeg",
+            "resolution": resolution_list,
+            "source": result.source,
+            "file_name": result.file_name,
+            "ocr_text": result.ocr_text,
+            "security_redactions": result.security_redactions,
+            "timestamp": result.timestamp,
         })
-
-    # Parse resolution string "1920x1080" into list [1920, 1080]
-    width, height = result.resolution.split("x")
-    resolution_list = [int(width), int(height)]
-
-    return json.dumps({
-        "image": result.base64_image,
-        "format": "jpeg",
-        "resolution": resolution_list,
-        "source": result.source,
-        "file_name": result.file_name,
-        "ocr_text": result.ocr_text,
-        "security_redactions": result.security_redactions,
-        "timestamp": result.timestamp,
-    })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -650,19 +741,22 @@ async def show_pairing_qr() -> str:
     Returns:
         JSON string with QR code data and pairing instructions, or error
     """
-    cfg = get_config()
-    if cfg.is_work_mode:
-        return json.dumps({
-            "error": True,
-            "code": "WORK_MODE",
-            "message": "Phone camera streaming is not available in work mode. Use analyze_image() with AirDrop instead."
-        })
+    try:
+        cfg = get_config()
+        if cfg.is_work_mode:
+            return json.dumps({
+                "error": True,
+                "code": "WORK_MODE",
+                "message": "Phone camera streaming is not available in work mode. Use analyze_image() with AirDrop instead."
+            })
 
-    bridge = _get_bridge()
-    lan_ip = _get_lan_ip()
-    qr_data = bridge.generate_pairing_qr(lan_ip)
+        bridge = _get_bridge()
+        lan_ip = _get_lan_ip()
+        qr_data = bridge.generate_pairing_qr(lan_ip)
 
-    return json.dumps(qr_data)
+        return json.dumps(qr_data)
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -677,40 +771,43 @@ async def capture_camera(prompt: str = "") -> str:
     Returns:
         JSON string with frame data or error
     """
-    cfg = get_config()
-    if cfg.is_work_mode:
+    try:
+        cfg = get_config()
+        if cfg.is_work_mode:
+            return json.dumps({
+                "error": True,
+                "code": "WORK_MODE",
+                "message": "Use analyze_image() with AirDrop in work mode."
+            })
+
+        bridge = _get_bridge()
+        if not bridge.is_phone_connected:
+            return json.dumps({
+                "error": True,
+                "code": "NO_PHONE",
+                "message": "No phone connected. Use show_pairing_qr() first."
+            })
+
+        frame_data = bridge.frame_queue.get_latest()
+        if frame_data is None:
+            return json.dumps({
+                "error": True,
+                "code": "NO_FRAMES",
+                "message": "No frames received yet."
+            })
+
+        frame_bytes, timestamp = frame_data
+        b64 = base64.b64encode(frame_bytes).decode("utf-8")
+
         return json.dumps({
-            "error": True,
-            "code": "WORK_MODE",
-            "message": "Use analyze_image() with AirDrop in work mode."
+            "image": b64,
+            "format": "jpeg",
+            "source": "phone_camera",
+            "timestamp": timestamp,
+            "frame_age_ms": int((time.time() - timestamp) * 1000),
         })
-
-    bridge = _get_bridge()
-    if not bridge.is_phone_connected:
-        return json.dumps({
-            "error": True,
-            "code": "NO_PHONE",
-            "message": "No phone connected. Use show_pairing_qr() first."
-        })
-
-    frame_data = bridge.frame_queue.get_latest()
-    if frame_data is None:
-        return json.dumps({
-            "error": True,
-            "code": "NO_FRAMES",
-            "message": "No frames received yet."
-        })
-
-    frame_bytes, timestamp = frame_data
-    b64 = base64.b64encode(frame_bytes).decode("utf-8")
-
-    return json.dumps({
-        "image": b64,
-        "format": "jpeg",
-        "source": "phone_camera",
-        "timestamp": timestamp,
-        "frame_age_ms": int((time.time() - timestamp) * 1000),
-    })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -733,77 +830,80 @@ async def watch_camera(
     Returns:
         JSON string with keyframes, transcript, and metadata
     """
-    cfg = get_config()
-    if cfg.is_work_mode:
+    try:
+        cfg = get_config()
+        if cfg.is_work_mode:
+            return json.dumps({
+                "error": True,
+                "code": "WORK_MODE",
+                "message": "Use analyze_image() with AirDrop in work mode."
+            })
+
+        bridge = _get_bridge()
+        if not bridge.is_phone_connected:
+            return json.dumps({
+                "error": True,
+                "code": "NO_PHONE",
+                "message": "No phone connected. Use show_pairing_qr() first."
+            })
+
+        # Collect frames for duration
+        start_time = time.time()
+        frames_captured = 0
+        collected_frames = []
+
+        while time.time() - start_time < duration_seconds:
+            frame_data = bridge.frame_queue.get_latest()
+            if frame_data:
+                frame_bytes, timestamp = frame_data
+                # Simple deduplication: only add if timestamp is different from last frame
+                if not collected_frames or collected_frames[-1][1] != timestamp:
+                    collected_frames.append((frame_bytes, timestamp))
+                    frames_captured += 1
+
+            await asyncio.sleep(0.5)  # Check every 0.5 seconds
+
+        # Apply simple scene change detection: keep every Nth frame up to max_frames
+        if len(collected_frames) > max_frames:
+            step = len(collected_frames) // max_frames
+            keyframes = [collected_frames[i] for i in range(0, len(collected_frames), step)][:max_frames]
+        else:
+            keyframes = collected_frames
+
+        # Encode keyframes to base64
+        keyframes_json = []
+        for frame_bytes, timestamp in keyframes:
+            b64 = base64.b64encode(frame_bytes).decode("utf-8")
+            keyframes_json.append({
+                "base64_image": b64,
+                "timestamp": timestamp,
+            })
+
+        # Audio transcription (simplified for now)
+        transcript = []
+        if include_audio and bridge.audio_buffer:
+            # In a real implementation, we would transcribe the audio buffer
+            # For now, just note that audio was recorded
+            transcript.append({
+                "text": f"[Audio recorded: {len(bridge.audio_buffer)} chunks]",
+                "start_time": start_time,
+                "end_time": time.time(),
+                "nearest_frame_index": 0,
+            })
+
+        duration_actual = time.time() - start_time
+
         return json.dumps({
-            "error": True,
-            "code": "WORK_MODE",
-            "message": "Use analyze_image() with AirDrop in work mode."
+            "keyframes": keyframes_json,
+            "transcript": transcript,
+            "duration_actual": duration_actual,
+            "frames_captured": frames_captured,
+            "frames_skipped_duplicate": len(collected_frames) - len(keyframes),
+            "audio_recorded": include_audio and len(bridge.audio_buffer) > 0,
+            "error": None,
         })
-
-    bridge = _get_bridge()
-    if not bridge.is_phone_connected:
-        return json.dumps({
-            "error": True,
-            "code": "NO_PHONE",
-            "message": "No phone connected. Use show_pairing_qr() first."
-        })
-
-    # Collect frames for duration
-    start_time = time.time()
-    frames_captured = 0
-    collected_frames = []
-
-    while time.time() - start_time < duration_seconds:
-        frame_data = bridge.frame_queue.get_latest()
-        if frame_data:
-            frame_bytes, timestamp = frame_data
-            # Simple deduplication: only add if timestamp is different from last frame
-            if not collected_frames or collected_frames[-1][1] != timestamp:
-                collected_frames.append((frame_bytes, timestamp))
-                frames_captured += 1
-
-        time.sleep(0.5)  # Check every 0.5 seconds
-
-    # Apply simple scene change detection: keep every Nth frame up to max_frames
-    if len(collected_frames) > max_frames:
-        step = len(collected_frames) // max_frames
-        keyframes = [collected_frames[i] for i in range(0, len(collected_frames), step)][:max_frames]
-    else:
-        keyframes = collected_frames
-
-    # Encode keyframes to base64
-    keyframes_json = []
-    for frame_bytes, timestamp in keyframes:
-        b64 = base64.b64encode(frame_bytes).decode("utf-8")
-        keyframes_json.append({
-            "base64_image": b64,
-            "timestamp": timestamp,
-        })
-
-    # Audio transcription (simplified for now)
-    transcript = []
-    if include_audio and bridge.audio_buffer:
-        # In a real implementation, we would transcribe the audio buffer
-        # For now, just note that audio was recorded
-        transcript.append({
-            "text": f"[Audio recorded: {len(bridge.audio_buffer)} chunks]",
-            "start_time": start_time,
-            "end_time": time.time(),
-            "nearest_frame_index": 0,
-        })
-
-    duration_actual = time.time() - start_time
-
-    return json.dumps({
-        "keyframes": keyframes_json,
-        "transcript": transcript,
-        "duration_actual": duration_actual,
-        "frames_captured": frames_captured,
-        "frames_skipped_duplicate": len(collected_frames) - len(keyframes),
-        "audio_recorded": include_audio and len(bridge.audio_buffer) > 0,
-        "error": None,
-    })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 @mcp.tool()
@@ -815,21 +915,24 @@ async def phone_status() -> str:
     Returns:
         JSON string with status information
     """
-    cfg = get_config()
-    bridge = _get_bridge() if not cfg.is_work_mode else None
+    try:
+        cfg = get_config()
+        bridge = _get_bridge() if not cfg.is_work_mode else None
 
-    if bridge is None:
+        if bridge is None:
+            return json.dumps({
+                "connected": False,
+                "mode": "work",
+                "message": "Phone streaming unavailable in work mode."
+            })
+
         return json.dumps({
-            "connected": False,
-            "mode": "work",
-            "message": "Phone streaming unavailable in work mode."
+            "connected": bridge.is_phone_connected,
+            "frames_in_queue": len(bridge.frame_queue),
+            "server_running": bridge.is_running,
         })
-
-    return json.dumps({
-        "connected": bridge.is_phone_connected,
-        "frames_in_queue": len(bridge.frame_queue),
-        "server_running": bridge.is_running,
-    })
+    except Exception as e:
+        return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
 
 def main():
