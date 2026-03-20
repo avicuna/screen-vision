@@ -196,7 +196,9 @@ class TestCameraBridge:
         assert bridge.is_phone_connected is False
         assert isinstance(bridge.pairing, PairingManager)
         assert isinstance(bridge.frame_queue, FrameQueue)
-        assert isinstance(bridge.audio_buffer, list)
+        # audio_buffer is now a deque to prevent unbounded memory growth
+        from collections import deque
+        assert isinstance(bridge.audio_buffer, deque)
         assert len(bridge.audio_buffer) == 0
 
     def test_bridge_pairing_generates_qr(self):

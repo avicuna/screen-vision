@@ -273,9 +273,9 @@ def _extract_frames(
                 file_path, start_time, effective_end, max_frames, temp_dir
             )
         else:
-            # Load extracted frames
+            # Load extracted frames and force load to prevent lazy loading issues
             frame_files = sorted(Path(temp_dir).glob("frame_*.png"))
-            frames = [Image.open(f) for f in frame_files]
+            frames = [Image.open(f).copy() for f in frame_files]
 
         # If we got fewer frames than requested, supplement with periodic samples
         if len(frames) < max_frames and len(frames) < 10:
@@ -342,8 +342,8 @@ def _extract_periodic_frames(
     )
 
     if result.returncode == 0:
-        # Load extracted frames
+        # Load extracted frames and force load to prevent lazy loading issues
         frame_files = sorted(Path(temp_dir).glob("periodic_*.png"))
-        frames = [Image.open(f) for f in frame_files]
+        frames = [Image.open(f).copy() for f in frame_files]
 
     return frames

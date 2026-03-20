@@ -26,6 +26,17 @@ except ImportError:
     WHISPER_AVAILABLE = False
 
 
+# Lazy singleton for Whisper model to avoid reloading on every transcribe() call
+_whisper_model = None
+
+def _get_whisper_model():
+    """Get or create the Whisper model singleton."""
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+    return _whisper_model
+
+
 @dataclass
 class TranscriptSegment:
     """A segment of transcribed speech with timing information."""
@@ -111,8 +122,8 @@ class AudioRecorder:
         if self.buffer is None or len(self.buffer) == 0:
             return []
 
-        # Load Whisper model (tiny model for speed, can be configured)
-        model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        # Get the singleton Whisper model (avoids reloading on every call)
+        model = _get_whisper_model()
 
         # Transcribe with word-level timestamps
         segments_iter, _ = model.transcribe(

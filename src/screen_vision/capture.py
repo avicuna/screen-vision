@@ -167,12 +167,15 @@ class ScreenCapture:
         """
         # Try to get window ID using AppleScript
         try:
+            # Sanitize window_title to prevent AppleScript injection
+            safe_title = window_title.replace('\\', '\\\\').replace('"', '\\"')
+
             # Use AppleScript to find the window ID
             script = f"""
             tell application "System Events"
                 set windowList to every window of (first application process whose frontmost is true)
                 repeat with w in windowList
-                    if name of w is "{window_title}" then
+                    if name of w is "{safe_title}" then
                         return id of w
                     end if
                 end repeat

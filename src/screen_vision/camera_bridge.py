@@ -1,4 +1,5 @@
 """Camera Bridge - WebSocket server that accepts phone camera frames."""
+import hmac
 import secrets
 import time
 from collections import deque
@@ -30,7 +31,8 @@ class PairingManager:
         if time.time() - self._created_at > self.expiry_seconds:
             self.pending_token = None
             return False
-        if token != self.pending_token:
+        # Use timing-safe comparison to prevent timing attacks
+        if not hmac.compare_digest(token, self.pending_token):
             return False
         self.pending_token = None  # Consume
         return True
@@ -431,7 +433,8 @@ class CameraBridge:
         self.port = port
         self.pairing = PairingManager()
         self.frame_queue = FrameQueue(max_size=30)
-        self.audio_buffer: list[bytes] = []
+        # Use bounded deque to prevent unbounded memory growth (~1000 chunks ≈ 60s at 16kHz)
+        self.audio_buffer: deque = deque(maxlen=1000)
         self.is_running = False
         self.is_phone_connected = False
         self._server_task = None
@@ -510,13 +513,14 @@ class CameraBridge:
         ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_context.load_cert_chain(certfile, keyfile)
 
-        # Start WebSocket server
+        # Start WebSocket server with max frame size limit to prevent oversized frames
         self._server = await serve(
             self._handle_websocket,
             host_ip,
             self.port,
             ssl=ssl_context,
             process_request=self._handle_http,
+            max_size=1048576,  # 1MB max frame size
         )
 
         self.is_running = True
