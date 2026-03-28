@@ -1,4 +1,5 @@
 """Tests for macOS context module."""
+import os
 import subprocess
 from unittest.mock import Mock, patch, MagicMock
 
@@ -117,6 +118,10 @@ class TestGetActiveWindow:
 class TestGetMonitors:
     """Tests for get_monitors."""
 
+    @pytest.mark.skipif(
+        os.environ.get("CI") == "true",
+        reason="Requires display (no screen in headless CI)",
+    )
     def test_returns_list_with_at_least_one_monitor(self):
         """Should return list with at least one monitor (real mss, no mock)."""
         monitors = get_monitors()
