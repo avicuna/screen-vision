@@ -1,0 +1,33 @@
+stages:
+  - lint
+  - test
+  - publish
+
+lint:
+  stage: lint
+  image: python:3.13-slim
+  script:
+    - pip install ruff
+    - ruff check src/
+
+test:
+  stage: test
+  image: python:3.13-slim
+  script:
+    - pip install -e ".[test]"
+    - python -m pytest tests/ -v
+
+publish:
+  stage: publish
+  image: python:3.13-slim
+  script:
+    - pip install build twine
+    - python -m build
+    - >
+      TWINE_PASSWORD=${CI_JOB_TOKEN}
+      TWINE_USERNAME=gitlab-ci-token
+      python -m twine upload
+      --repository-url ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/pypi
+      dist/*
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
