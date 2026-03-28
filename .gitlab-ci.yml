@@ -14,7 +14,8 @@ test:
   stage: test
   image: python:3.13-slim
   script:
-    - pip install -e ".[test]"
+    - apt-get update -qq && apt-get install -y -qq libgl1 libglib2.0-0 > /dev/null
+    - pip install -e ".[test]" --quiet
     - python -m pytest tests/ -v
 
 publish:
