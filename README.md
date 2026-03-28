@@ -6,13 +6,12 @@ Screen Vision lets Claude capture screenshots, watch your screen in real-time wi
 
 ## Quick Start
 
-**Via the RTA AI Marketplace (zero-install, recommended):**
+**Via the [RTA AI Marketplace](https://gitlab.agodadev.io/partnertech/rta-ai/rta-ai-marketplace) (zero-install, recommended):**
 ```bash
-/plugin marketplace add https://gitlab.agodadev.io/partnertech/rta-ai/rta-ai-marketplace.git
 /plugin install screen-vision
 ```
 
-That's it. The MCP server auto-downloads on first use via `uvx`.
+The MCP server auto-downloads on first use via `uvx`. If you haven't added the marketplace yet, see the [marketplace README](https://gitlab.agodadev.io/partnertech/rta-ai/rta-ai-marketplace) for one-time setup.
 
 **Other install methods:**
 ```bash
