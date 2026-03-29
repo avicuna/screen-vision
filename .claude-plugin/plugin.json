@@ -1,0 +1,17 @@
+{
+  "name": "screen-vision",
+  "displayName": "Screen Vision — See Your Screen from Claude Code",
+  "description": "Give Claude the ability to see your screen and phone camera, watch them in real-time with audio transcription, and analyze video files. 14 tools including: capture_screen, analyze_image, show_pairing_qr, capture_camera, watch_camera, phone_status, watch_screen, analyze_video, and more.",
+  "version": "0.2.1",
+  "author": {
+    "name": "Alex Vicuna"
+  },
+  "category": "development",
+  "setup": "pip install screen-vision --quiet && echo '✓ screen-vision installed' && echo 'Optional: brew install tesseract ffmpeg (for OCR + video)'",
+  "mcpServers": {
+    "screen-vision": {
+      "command": "python3",
+      "args": ["-m", "screen_vision"]
+    }
+  }
+}
