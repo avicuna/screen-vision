@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "screen-vision"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server that gives Claude Code the ability to see your screen"
 requires-python = ">=3.11"
 dependencies = [
@@ -34,7 +34,7 @@ test = [
 screen-vision-mcp = "screen_vision.server:main"
 
 [project.urls]
-Repository = "https://gitlab.agodadev.io/partnertech/rta-ai/screen-vision"
+Repository = "https://github.com/avicuna/screen-vision"
 
 [tool.setuptools.packages.find]
 where = ["src"]

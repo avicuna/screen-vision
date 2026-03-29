@@ -139,8 +139,8 @@ async def understand_image(
     """
     start_time = time.time()
 
-    # Check for authentication
-    auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+    # Check for authentication — supports ANTHROPIC_API_KEY (standard) or ANTHROPIC_AUTH_TOKEN (legacy)
+    auth_token = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
     if not auth_token:
         return UnderstandingResult(
             summary="",
@@ -150,13 +150,13 @@ async def understand_image(
             actionable_insights=[],
             full_text=ocr_text,
             confidence=0.0,
-            error="Missing ANTHROPIC_AUTH_TOKEN environment variable",
+            error="Missing ANTHROPIC_API_KEY environment variable",
             latency_ms=int((time.time() - start_time) * 1000)
         )
 
-    # Get configuration
-    gateway_url = os.environ.get("GENAI_GATEWAY_URL", "https://genai-gateway.agoda.is")
-    model = os.environ.get("SCREEN_VISION_UNDERSTANDING_MODEL", "claude-opus-4-6")
+    # Get configuration — defaults to Anthropic API; set GENAI_GATEWAY_URL to override
+    gateway_url = os.environ.get("GENAI_GATEWAY_URL", "https://api.anthropic.com")
+    model = os.environ.get("SCREEN_VISION_UNDERSTANDING_MODEL", "claude-sonnet-4-5-20241022")
 
     try:
         # Encode image to base64

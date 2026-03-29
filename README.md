@@ -6,23 +6,26 @@ Screen Vision lets Claude capture screenshots, watch your screen in real-time wi
 
 ## Quick Start
 
-**Via the [RTA AI Marketplace](https://gitlab.agodadev.io/partnertech/rta-ai/rta-ai-marketplace) (zero-install, recommended):**
 ```bash
-/plugin install screen-vision
+pip install screen-vision
 ```
 
-The MCP server auto-downloads on first use via `uvx`. If you haven't added the marketplace yet, see the [marketplace README](https://gitlab.agodadev.io/partnertech/rta-ai/rta-ai-marketplace) for one-time setup.
+Then add to your Claude Code MCP config (`.mcp.json`):
+```json
+{
+  "mcpServers": {
+    "screen-vision": {
+      "command": "python3",
+      "args": ["-m", "screen_vision"]
+    }
+  }
+}
+```
 
 **Other install methods:**
 ```bash
-# One-off run (no permanent install)
-uvx --extra-index-url https://gitlab.agodadev.io/api/v4/projects/partnertech%2Frta-ai%2Fscreen-vision/packages/pypi/simple screen-vision-mcp
-
-# Permanent install
-pip install screen-vision --extra-index-url https://gitlab.agodadev.io/api/v4/projects/partnertech%2Frta-ai%2Fscreen-vision/packages/pypi/simple
-
 # From git (with all optional extras)
-pip install "git+ssh://git@gitlab.agodadev.io/partnertech/rta-ai/screen-vision.git[full]"
+pip install "screen-vision[full]"
 
 # Local development
 pip install -e ".[full]"
@@ -111,8 +114,8 @@ src/screen_vision/
 
 ## Author
 
-**Alex Vicuna** (alejandro.vicuna@agoda.com) — RTA AI Team
+**Alex Vicuna** — [github.com/avicuna](https://github.com/avicuna)
 
 ## Contributing
 
-Issues and MRs welcome: https://gitlab.agodadev.io/partnertech/rta-ai/screen-vision
+Issues and PRs welcome: https://github.com/avicuna/screen-vision
