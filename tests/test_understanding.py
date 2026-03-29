@@ -106,7 +106,7 @@ async def test_understand_image_no_auth(sample_image):
     with patch.dict("os.environ", {}, clear=True):
         result = await understand_image(sample_image)
     assert result.error is not None
-    assert "auth" in result.error.lower() or "token" in result.error.lower()
+    assert "anthropic_api_key" in result.error.lower()
 
 
 @pytest.mark.asyncio
