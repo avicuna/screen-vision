@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "screen-vision"
-version = "0.3.0"
+version = "0.3.1"
 description = "MCP server that gives Claude Code the ability to see your screen"
 requires-python = ">=3.11"
 dependencies = [
