@@ -17,11 +17,23 @@ from screen_vision.security import SecurityScanner
 from screen_vision.watcher import ScreenWatcher
 from screen_vision.video import analyze_video as analyze_video_func
 from screen_vision.understanding import understand_image
+from screen_vision.version_check import get_update_status, format_update_notice
 
-# Initialize FastMCP server
+
+def _build_instructions() -> str:
+    """Build dynamic MCP instructions with version and update info."""
+    status = get_update_status()
+    lines = [f"Screen Vision v{status.current} — gives Claude the ability to see your screen."]
+    notice = format_update_notice(status)
+    if notice:
+        lines.append(f"⚠ {notice}")
+    return " ".join(lines)
+
+
+# Initialize FastMCP server with dynamic instructions
 mcp = FastMCP(
     "screen-vision",
-    instructions="Screen Vision gives Claude the ability to see your screen."
+    instructions=_build_instructions(),
 )
 
 # Rate limiting state
@@ -31,6 +43,24 @@ _capture: ScreenCapture | None = None
 
 # Security scanner singleton
 _scanner: SecurityScanner | None = None
+
+# One-time update nudge — shown in the first tool response, then cleared
+_update_nudge: str | None = format_update_notice(get_update_status())
+_nudge_shown = False
+
+
+def _maybe_append_nudge(response: str) -> str:
+    """Append update notice to the first tool response in the session."""
+    global _nudge_shown
+    if _update_nudge and not _nudge_shown:
+        _nudge_shown = True
+        try:
+            data = json.loads(response)
+            data["update_available"] = _update_nudge
+            return json.dumps(data)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return response
 
 
 def _get_scanner() -> SecurityScanner:
@@ -205,7 +235,7 @@ async def capture_screen(
         # Process frame
         processed = _process_frame(result.image, result.cursor_position, result.active_window)
 
-        return json.dumps(processed)
+        return _maybe_append_nudge(json.dumps(processed))
     except Exception as e:
         return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
@@ -682,12 +712,12 @@ async def get_active_context() -> str:
         active_win = context.get_active_window()
         monitors = context.get_monitors()
 
-        return json.dumps({
+        return _maybe_append_nudge(json.dumps({
             "cursor_position": list(cursor_pos) if cursor_pos else None,
             "active_window": active_win,
             "monitors": monitors,
             "timestamp": time.time(),
-        })
+        }))
     except Exception as e:
         return json.dumps({"error": True, "code": "INTERNAL_ERROR", "message": str(e)})
 
@@ -759,9 +789,11 @@ async def understand_screen(prompt: str = "") -> str:
         # Auto-hide terminal for clean screenshot
         hidden_app = context.hide_terminal()
 
-        # macOS needs ~2s to fully update the screen buffer after hiding a window
+        # Wait for compositor to update after hiding
         if hidden_app:
-            await asyncio.sleep(2.0)
+            from screen_vision.context import _wait_for_terminal_hidden
+            if not _wait_for_terminal_hidden(hidden_app):
+                await asyncio.sleep(1.5)  # fallback
 
         # Capture screen
         cap = _get_capture()
