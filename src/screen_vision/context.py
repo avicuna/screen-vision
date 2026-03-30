@@ -1,5 +1,7 @@
 """macOS context module for getting active window, cursor position, and monitor info."""
+import logging
 import subprocess
+import time
 from typing import Any
 
 import mss
@@ -187,29 +189,97 @@ def get_visible_windows() -> list[dict[str, Any]]:
 
 
 # Terminal apps that Claude Code typically runs in
-TERMINAL_APPS = {"iTerm2", "Terminal", "Alacritty", "kitty", "Warp", "Hyper", "WezTerm"}
+TERMINAL_APPS = {"iTerm2", "Terminal", "Alacritty", "kitty", "Warp", "Hyper", "WezTerm", "ghostty", "Ghostty"}
+
+
+logger = logging.getLogger("screen_vision")
+
+
+def _is_app_visible(app: str) -> bool:
+    """Check if a terminal app is currently visible via System Events."""
+    try:
+        # SECURITY: only called with values from TERMINAL_APPS whitelist
+        result = _run_osascript(f'''
+            tell application "System Events"
+                return (visible of process "{app}") as text
+            end tell
+        ''')
+        return result.strip() == "true"
+    except Exception:
+        return True  # assume visible on error (safer to wait longer)
+
+
+def _wait_for_terminal_hidden(app: str, timeout: float = 2.0) -> bool:
+    """Poll until the terminal is no longer visible on screen.
+
+    Args:
+        app: Terminal app name (must be in TERMINAL_APPS whitelist).
+        timeout: Maximum seconds to wait before giving up.
+
+    Returns:
+        True if the terminal became hidden within the timeout, False otherwise.
+    """
+    start = time.monotonic()
+    deadline = start + timeout
+    while time.monotonic() < deadline:
+        if not _is_app_visible(app):
+            # One extra compositor frame for the buffer to finish updating
+            time.sleep(0.05)
+            elapsed = time.monotonic() - start
+            logger.debug("Terminal %s hidden after %.2fs", app, elapsed)
+            return True
+        time.sleep(0.1)
+    return False
 
 
 def hide_terminal() -> str | None:
     """Hide the frontmost terminal app. Returns the app name if hidden, None if not a terminal.
 
-    Uses 'tell application X to activate' then Cmd+H to reliably hide.
-    The 'set visible to false' approach is instant but the screen buffer
-    may not update before capture. Cmd+H triggers proper window animations
-    that macOS's compositor tracks.
+    Strategy:
+    1. Send Cmd+H via System Events keystroke (triggers NSApplication hide:
+       which properly invalidates the compositor).
+    2. Verify the app is hidden by polling its visible attribute.
+    3. If Cmd+H failed (non-Cocoa terminal, remapped shortcut), fall back
+       to 'set visible to false'.
+
+    NOTE: Cmd+H hides ALL windows of the terminal app, not just the
+    frontmost one. This is inherent to macOS hide behavior.
     """
     try:
         active = get_active_window()
         app = active.get("app_name", "")
-        if app in TERMINAL_APPS:
-            # Use the app's own hide command for reliable hiding
+        if app not in TERMINAL_APPS:
+            return None
+
+        # SECURITY: `app` is safe to interpolate into AppleScript only because
+        # it was validated against the hardcoded TERMINAL_APPS set above.
+        # Do not move this interpolation outside that check.
+
+        # Primary: Cmd+H via standard macOS hide path.
+        # Poll for frontmost instead of fixed delay to eliminate the race.
+        _run_osascript(f'''
+            tell application "{app}" to activate
+            tell application "System Events"
+                repeat 20 times
+                    if frontmost of process "{app}" then exit repeat
+                    delay 0.05
+                end repeat
+                keystroke "h" using command down
+            end tell
+        ''')
+
+        # Verify it worked; fall back to set-visible if Cmd+H was ignored
+        # (non-Cocoa terminals like Kitty/Alacritty don't process it)
+        time.sleep(0.3)
+        if _is_app_visible(app):
+            logger.warning("Cmd+H failed for %s, falling back to set visible", app)
             _run_osascript(f'''
                 tell application "System Events"
                     set visible of process "{app}" to false
                 end tell
             ''')
-            return app
-        return None
+
+        return app
     except Exception:
         return None
 

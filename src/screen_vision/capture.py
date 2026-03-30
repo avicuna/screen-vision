@@ -55,14 +55,20 @@ class ScreenCapture:
             CaptureResult with the captured image and metadata
         """
         # Auto-hide terminal so it doesn't occlude the screen
-        from screen_vision.context import hide_terminal, restore_terminal
+        from screen_vision.context import hide_terminal, restore_terminal, _wait_for_terminal_hidden
         hidden_app = hide_terminal()
 
-        # macOS needs ~2s to fully update the screen buffer after hiding a window
+        # Wait for the terminal to fully disappear from the screen buffer.
+        # Polling is more reliable than a fixed sleep — exits early on fast
+        # machines, waits longer on slow ones.
         if hidden_app:
-            time.sleep(2.0)
+            if not _wait_for_terminal_hidden(hidden_app):
+                import logging
+                logging.getLogger("screen_vision").warning(
+                    "Terminal %s did not hide within timeout", hidden_app
+                )
+                time.sleep(1.5)  # last-resort fallback
         elif delay_seconds > 0:
-            # Only use manual delay if terminal wasn't auto-hidden
             time.sleep(delay_seconds)
 
         # Capture the screen (with terminal restore in finally)
