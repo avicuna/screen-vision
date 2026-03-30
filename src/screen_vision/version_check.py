@@ -52,7 +52,6 @@ def _is_running_under_uvx() -> bool:
     """
     try:
         # Check if the package location is inside a uv cache directory
-        from importlib.metadata import packages_distributions
         import screen_vision
         pkg_path = str(Path(screen_vision.__file__).resolve())
         uv_cache = str(Path.home() / ".cache" / "uv")
