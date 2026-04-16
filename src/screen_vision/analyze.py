@@ -10,7 +10,7 @@ from typing import Optional
 from PIL import Image
 
 from screen_vision.config import get_config
-from screen_vision.ocr import run_ocr
+from screen_vision.ocr import run_ocr, NoOcrEngineError
 from screen_vision.security import SecurityScanner
 
 
@@ -89,9 +89,13 @@ def analyze_image(file_path: str, prompt: str = "") -> AnalyzeResult:
                 new_width = int(width * (max_dimension / height))
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-        # Run OCR
-        ocr_result = run_ocr(image)
-        ocr_text = ocr_result.text
+        # Run OCR (optional — image analysis works without it)
+        try:
+            ocr_result = run_ocr(image)
+            ocr_text = ocr_result.text
+        except NoOcrEngineError:
+            ocr_result = None
+            ocr_text = ""
 
         # Security scan (work mode only)
         security_redactions = 0

@@ -616,7 +616,7 @@ async def read_screen_text(
                     "message": f"Invalid region format: {e}"
                 })
         else:
-            result = cap.capture_screen(scale=0.5)
+            result = cap.capture_screen(scale=1.0)
 
         # Record capture AFTER successful capture
         _record_capture()
