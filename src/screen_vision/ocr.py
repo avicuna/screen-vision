@@ -35,6 +35,10 @@ except ImportError:
     HAS_TESSERACT = False
 
 
+class NoOcrEngineError(RuntimeError):
+    """Raised when no OCR engine (PaddleOCR or pytesseract) is available."""
+
+
 @dataclass
 class OcrResult:
     """Result of OCR operation."""
@@ -327,8 +331,15 @@ def run_ocr(image: Image.Image) -> OcrResult:
     if HAS_TESSERACT:
         return _run_pytesseract_ocr(image)
 
-    # No OCR available
-    return OcrResult(text="", blocks=[], average_confidence=0.0)
+    # No OCR engine available — fail loudly instead of returning empty results
+    raise NoOcrEngineError(
+        "No OCR engine available. Install one:\n"
+        "  pip install 'screen-vision[ocr]'   (pytesseract + system tesseract binary)\n"
+        "    macOS:   brew install tesseract\n"
+        "    Linux:   apt-get install tesseract-ocr\n"
+        "    Windows: https://github.com/UB-Mannheim/tesseract/wiki\n"
+        "  pip install 'screen-vision[paddle]' (PaddleOCR, ~1GB, self-contained)"
+    )
 
 
 def extract_text_near(blocks: List[Dict[str, Any]], cursor: Dict[str, int], radius: int = 200) -> str:

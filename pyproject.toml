@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "screen-vision"
-version = "0.3.2"
+version = "0.3.3"
 description = "MCP server that gives Claude Code the ability to see your screen"
 requires-python = ">=3.11"
 dependencies = [
@@ -18,12 +18,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-full = [
-    "paddleocr>=2.7.0",
+ocr = [
     "pytesseract>=0.3.10",
+]
+paddle = [
+    "paddleocr>=2.7.0",
+    "opencv-python-headless>=4.8.0",
+]
+audio = [
     "faster-whisper>=1.0.0",
     "sounddevice>=0.4.6",
-    "opencv-python>=4.8.0",
+]
+full = [
+    "pytesseract>=0.3.10",
+    "paddleocr>=2.7.0",
+    "opencv-python-headless>=4.8.0",
+    "faster-whisper>=1.0.0",
+    "sounddevice>=0.4.6",
 ]
 test = [
     "pytest>=8.0.0",

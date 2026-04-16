@@ -99,17 +99,14 @@ def test_extract_text_near_excludes_far():
     assert 'VeryFar' not in result
 
 
-def test_ocr_graceful_when_paddle_missing(sample_image):
-    """run_ocr should fallback to pytesseract, then return empty if both missing."""
-    # Test when both PaddleOCR and pytesseract are missing
+def test_ocr_raises_when_no_engine(sample_image):
+    """run_ocr should raise NoOcrEngineError when both engines are missing."""
+    from screen_vision.ocr import NoOcrEngineError
+
     with patch('screen_vision.ocr.HAS_PADDLE', False):
         with patch('screen_vision.ocr.HAS_TESSERACT', False):
-            result = run_ocr(sample_image)
-
-            assert isinstance(result, OcrResult)
-            assert result.text == ""
-            assert result.blocks == []
-            assert result.average_confidence == 0.0
+            with pytest.raises(NoOcrEngineError, match="No OCR engine available"):
+                run_ocr(sample_image)
 
 
 def test_ocr_fallback_to_pytesseract(sample_image):

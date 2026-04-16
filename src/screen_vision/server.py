@@ -12,7 +12,7 @@ from screen_vision.config import get_config
 from screen_vision import context
 from screen_vision import analyze as analyze_mod
 from screen_vision.capture import ScreenCapture, encode_jpeg
-from screen_vision.ocr import run_ocr, extract_text_near
+from screen_vision.ocr import run_ocr, extract_text_near, NoOcrEngineError
 from screen_vision.security import SecurityScanner
 from screen_vision.watcher import ScreenWatcher
 from screen_vision.video import analyze_video as analyze_video_func
@@ -624,6 +624,12 @@ async def read_screen_text(
         # Run OCR
         try:
             ocr_result = run_ocr(result.image)
+        except NoOcrEngineError as e:
+            return json.dumps({
+                "error": True,
+                "code": "NO_OCR_ENGINE",
+                "message": str(e),
+            })
         except Exception as e:
             return json.dumps({
                 "error": True,
