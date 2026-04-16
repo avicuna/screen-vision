@@ -7,7 +7,7 @@ Screen Vision lets Claude capture screenshots, watch your screen in real-time wi
 ## Quick Start
 
 ```bash
-pip install screen-vision
+pip install screen-vision[ocr]
 ```
 
 Then add to your Claude Code MCP config (`.mcp.json`):
@@ -15,17 +15,16 @@ Then add to your Claude Code MCP config (`.mcp.json`):
 {
   "mcpServers": {
     "screen-vision": {
-      "command": "python3",
-      "args": ["-m", "screen_vision"]
+      "command": "screen-vision-mcp"
     }
   }
 }
 ```
 
-**Optional system deps** (not required — tools gracefully degrade without them):
+**System deps for OCR and video:**
 ```bash
-brew install tesseract   # Enables OCR (read_screen_text)
-brew install ffmpeg      # Enables video analysis (analyze_video)
+brew install tesseract   # Required for OCR (read_screen_text)
+brew install ffmpeg      # Required for video analysis (analyze_video)
 ```
 
 ## What You Can Say
@@ -76,19 +75,21 @@ Set `SCREEN_VISION_MODE=work` to enable all security controls. Default mode is `
 
 **Core** (always installed): `mcp[cli]`, `mss`, `Pillow`, `numpy`, `httpx`
 
-**Optional** (`pip install screen-vision[full]`):
-- `pytesseract` — OCR (needs `brew install tesseract`)
-- `faster-whisper` — Audio transcription
-- `sounddevice` — Audio recording
-- `opencv-python` — Video processing
-- `paddleocr` — Alternative OCR engine
+**Extras** (mix and match):
+
+| Extra | Install | What you get |
+|-------|---------|-------------|
+| `[ocr]` | `pip install screen-vision[ocr]` | `pytesseract` — OCR via tesseract (~5MB, needs `brew install tesseract`) |
+| `[paddle]` | `pip install screen-vision[paddle]` | `paddleocr` + `opencv-python-headless` — higher-accuracy OCR (~1GB, self-contained) |
+| `[audio]` | `pip install screen-vision[audio]` | `faster-whisper` + `sounddevice` — audio transcription for `watch_screen` |
+| `[full]` | `pip install screen-vision[full]` | All of the above |
 
 **Python 3.11+ required.**
 
 ## Development
 
 ```bash
-pip install -e ".[full,test]"
+pip install -e ".[ocr,test]"
 pytest tests/ -v
 ruff check src/
 ```
