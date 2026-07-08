@@ -4,6 +4,15 @@
 
 Screen Vision lets Claude capture screenshots, watch your screen in real-time with audio transcription, analyze video files, and read text via OCR. It runs locally as an MCP server — Claude sees what you see, when you ask.
 
+## Privacy & Security
+
+**All capture is local and on-demand — no background recording, no persistent process, no external transmission.**
+
+- Screen Vision runs as a local MCP server (stdio transport). It only captures when Claude explicitly calls a tool in response to your request.
+- Captured images and transcriptions are sent only to your existing Claude Code session — the same endpoint all Claude Code traffic uses. No third-party services, no cloud storage.
+- The server does not run in the background between Claude Code sessions. It starts when Claude Code starts and stops when it stops.
+- No data is written to disk unless you explicitly ask Claude to save a file.
+
 ## Quick Start
 
 ```bash
